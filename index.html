@@ -924,6 +924,7 @@ function calcTotal(){
 /* Apply the quarter preset: fills the 3 hidden month values + the month label and recalculates Sunday count. */
 function applyQuarterPreset(){
  var q=+V('fQPre').value||1,y=+V('fQYear').value||new Date().getFullYear();
+ var fq=V('fQuarter');if(fq)fq.value='Q'+q;
  var starts={1:1,2:4,3:7,4:10}[q]||1;
  var mono=['January','February','March','April','May','June','July','August','September','October','November','December'];
  for(var i=0;i<3;i++){var mm=starts+i;var ym=y+'-'+('0'+mm).slice(-2);var el=V('fMon'+(i+1));if(el)el.value=ym;}
