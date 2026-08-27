@@ -768,9 +768,66 @@ function renderNewReport(){
  a.innerHTML='<div class="card"><div id="reportForm"></div></div>';
  buildForm(null);
 }
+
+/* Return the exact branch name as entered in the Admin Dashboard's Branches list. */
+function resolveBranch(b){
+ if(!b)return b;
+ var bs=getBranches()||[];
+ if(bs.indexOf(b)!==-1)return b;
+ for(var i=0;i<bs.length;i++){if(String(bs[i]).toLowerCase()===String(b).toLowerCase())return bs[i];}
+ return b;
+}
+
+/* Build the 7a Sunday Attendance section: 3 months, each with Men/Women/Children/Youth Boys/Youth Girls. */
+function sunH(d){
+ var dm=(d.sunday&&d.sunday.months)||[];
+ function g(i,k){return dm[i]&&dm[i][k]!=null&&dm[i][k]!==''?dm[i][k]:'';}
+ var h='<div class="section-h"><span class="dot"></span><h3>7a. SUNDAY ATTENDANCE (Average for Quarter)</h3></div>'+
+  '<p class="muted" style="margin-bottom:8px">Select the 3 months of the quarter and enter the average attendance for each month under each category.</p>'+
+  '<div class="grid3">'+
+   '<div class="form-group"><label>Month 1</label><input type="month" id="fMon1" value="'+esc(g(0,'mon'))+'" onchange="calcSundays()"></div>'+
+   '<div class="form-group"><label>Month 2</label><input type="month" id="fMon2" value="'+esc(g(1,'mon'))+'" onchange="calcSundays()"></div>'+
+   '<div class="form-group"><label>Month 3</label><input type="month" id="fMon3" value="'+esc(g(2,'mon'))+'" onchange="calcSundays()"></div>'+
+  '</div>'+
+  '<div style="overflow-x:auto;margin-top:8px"><table class="data"><tr><th>Category</th><th>Month 1</th><th>Month 2</th><th>Month 3</th><th>Quarter Average</th></tr>';
+ var cats=[['Men','Men','men'],['Women','Wom','wom'],['Children','Ch','ch'],['Youth Boys','Yb','yb'],['Youth Girls','Yg','yg']];
+ cats.forEach(function(c){
+  h+='<tr><td><b>'+c[0]+'</b></td>'+
+   '<td><input type="number" min="0" id="fSm'+c[1]+'1" value="'+esc(g(0,c[2]))+'" oninput="calcAvg()"></td>'+
+   '<td><input type="number" min="0" id="fSm'+c[1]+'2" value="'+esc(g(1,c[2]))+'" oninput="calcAvg()"></td>'+
+   '<td><input type="number" min="0" id="fSm'+c[1]+'3" value="'+esc(g(2,c[2]))+'" oninput="calcAvg()"></td>'+
+   '<td><input id="fAvg'+c[1]+'" readonly style="background:#eef2fb;font-weight:800"></td></tr>';
+ });
+ h+='<tr><td><b>SUNDAY TOTAL</b></td><td></td><td></td><td></td><td><input id="fAvgTotal" readonly style="background:var(--green);color:#fff;font-weight:800;font-size:16px"></td></tr></table></div>';
+ return h;
+}
+
+/* Auto-calculate quarter averages and total for Sunday attendance. */
+function calcAvg(){
+ var keys=[['Men','Men'],['Wom','Wom'],['Ch','Ch'],['Yb','Yb'],['Yg','Yg']];
+ var total=0;
+ keys.forEach(function(k){
+  var sum=0,cnt=0;
+  for(var i=1;i<=3;i++){var el=V('fSm'+k[1]+i);if(el&&el.value!==''){sum+=+el.value||0;cnt++;}}
+  var avg=cnt?Math.round(sum/cnt):0;
+  var e=V('fAvg'+k[1]);if(e)e.value=avg;
+  total+=avg;
+ });
+ var t=V('fAvgTotal');if(t)t.value=total;
+}
+
+/* Collect the 3-month Sunday attendance from the form. */
+function sundayCollect(){
+ function m(i){return V('fMon'+i)?V('fMon'+i).value:'';}
+ var cats=[['men','Men'],['wom','Wom'],['ch','Ch'],['yb','Yb'],['yg','Yg']];
+ var months=[];
+ for(var i=1;i<=3;i++){var o={mon:m(i)};cats.forEach(function(c){o[c[0]]=V('fSm'+c[1]+i)?+V('fSm'+c[1]+i).value||0:0;});months.push(o);}
+ return {months:months,men:+V('fAvgMen').value||0,wom:+V('fAvgWom').value||0,ch:+V('fAvgCh').value||0,yb:+V('fAvgYb').value||0,yg:+V('fAvgYg').value||0,vis:0,total:+V('fAvgTotal').value||0};
+}
+
 function buildForm(r){
  var box=document.getElementById('reportForm');
- var b=session.obj.branch;
+ var b=resolveBranch(session.obj.branch);
  var d=r||{};
  var finT= d.tithe||[{amt:'',mon:''},{amt:'',mon:''},{amt:'',mon:''}];
  var finL= d.levy||[{amt:'',mon:''},{amt:'',mon:''},{amt:'',mon:''}];
@@ -779,15 +836,12 @@ function buildForm(r){
   '<p class="muted">Complete all sections. Membership total is auto-calculated.</p>'+
   // quarter
   '<div class="section-h"><span class="dot"></span><h3>A. CHURCH STATUS</h3></div>'+
-  '<div class="grid2"><div class="form-group"><label>1. Name of local church</label><input id="fBranch" value="'+esc(b)+'" readonly></div>'+
+  '<div class="grid2"><div class="form-group"><label>1. Name of Local Branch</label><input id="fBranch" value="'+esc(b)+'" readonly></div>'+
   '<div class="form-group"><label>Quarter</label><select id="fQuarter">'+[1,2,3,4].map(function(q){return '<option'+(d.quarter==q?' selected':'')+'>Q'+q+'</option>';}).join('')+'</select></div></div>'+
   '<div class="grid2"><div class="form-group"><label>From Date (calendar)</label><input type="date" id="fFrom" value="'+esc(d.from||'')+'"></div><div class="form-group"><label>To Date (calendar)</label><input type="date" id="fTo" value="'+esc(d.to||'')+'"></div></div>'+
   '<div class="grid5">'+numField('fChildren','6. Children',d.children)+numField('fMen','3. Men',d.men)+numField('fWomen','4. Women',d.women)+numField('fYouth','5. Youth',d.youth)+'<div class="form-group"><label>2. Total Membership</label><input id="fTotal" readonly style="background:#eef7ff;font-weight:800" value="'+esc(d.total||'')+'"></div></div>'+
   // sunday
-  '<div class="section-h"><span class="dot"></span><h3>7a. SUNDAY ATTENDANCE (Average for Quarter)</h3></div>'+
-  '<div class="grid2"><div class="form-group"><label>Reference Month</label><input type="month" id="fMonth" value="'+esc(d.month||'')+'" onchange="calcSundays()"></div><div class="form-group"><label>Number of Sundays in the month</label><input id="fSundays" readonly style="background:#eef2fb;font-weight:800" value="'+esc(d.numSundays||'')+'"></div></div>'+
-  '<div class="grid2">'+numField('fSmMen','(i) Men',d.sunday&&d.sunday.men)+numField('fSmYb','(ii) Youth Boys',d.sunday&&d.sunday.yb)+numField('fSmWom','(iii) Women',d.sunday&&d.sunday.wom)+numField('fSmYg','(iv) Youth Girls',d.sunday&&d.sunday.yg)+numField('fSmCh','(v) Children',d.sunday&&d.sunday.ch)+numField('fSmVis','(vi) Visitor',d.sunday&&d.sunday.vis)+'</div>'+
-  '<div class="form-group"><label>SUNDAY TOTAL</label><input id="fSmTotal" readonly style="background:var(--green);color:#fff;font-weight:800;font-size:17px" value="'+esc(d.sunday&&d.sunday.total||'')+'"></div>'+
+  sunH(d)+
   // weekday
   '<div class="section-h"><span class="dot"></span><h3>7b. EVENING / WEEKDAY SERVICE ATTENDANCE (Average for Quarter)</h3></div>'+
   '<p class="muted" style="margin-bottom:8px">Add a row per weekday. Attendance is the average for the quarter.</p>'+
@@ -847,6 +901,8 @@ function buildForm(r){
  fillTxt(d.visions||[{},{}],'visRows','Vision');
  fillTxt(d.how||[{},{}],'howRows','How');
  calcTotal();
+ calcAvg();
+ calcSundays();
 }
 var renderContext='new'; // 'new' or 'edit'
 function numField(id,label,val){return '<div class="form-group"><label>'+label+'</label><input type="number" id="'+id+'" value="'+esc(val==null?'':val)+'" oninput="calcTotal()"></div>';}
@@ -854,10 +910,9 @@ function fillTxt(arr,id,ph){document.getElementById(id).innerHTML='';if(!arr||!a
 function calcTotal(){
  var c=+V('fChildren').value||0,m=+V('fMen').value||0,w=+V('fWomen').value||0,y=+V('fYouth').value||0;
  var e=V('fTotal');if(e)e.value=c+m+w+y;
- var s=0;['fSmMen','fSmYb','fSmWom','fSmYg','fSmCh','fSmVis'].forEach(function(id){var n=+V(id).value||0;s+=n;});var t=V('fSmTotal');if(t)t.value=s;
 }
 function calcSundays(){
- var m=V('fMonth')&&V('fMonth').value;if(!m){return;}var p=m.split('-');var yy=+p[0],mm=+p[1];var dt=new Date(yy,mm-1,1),c=0;while(dt.getMonth()===mm-1){if(dt.getDay()===0)c++;dt.setDate(dt.getDate()+1);}V('fSundays').value=c;
+ var tot=0;['fMon1','fMon2','fMon3'].forEach(function(id){var el=V(id);var m=el&&el.value;if(!m)return;var p=m.split('-');var yy=+p[0],mm=+p[1];var dt=new Date(yy,mm-1,1),c=0;while(dt.getMonth()===mm-1){if(dt.getDay()===0)c++;dt.setDate(dt.getDate()+1);}tot+=c;});var t=V('fSundays');if(t)t.value=tot;
 }
 function V(id){return document.getElementById(id);}
 function addWdRow(){addWd();}
@@ -891,11 +946,11 @@ function collectReport(){
  var wd=[];document.querySelectorAll('#wdRows .grid3').forEach(function(r){var sel=r.querySelector('select'),num=r.querySelector('input[type=number]');if(sel&&num)wd.push({day:sel.value,att:num.value});});
  var rv=[];document.querySelectorAll('#revRows .grid3').forEach(function(r){var i=r.querySelectorAll('input');rv.push({name:i[0].value,month:i[1].value,loc:i[2].value});});
  return {
-  branch:session.obj.branch, quarter:qn, quarterLabel:'Q'+qn+' '+yr, year:yr, year:yr,
+  branch:resolveBranch(session.obj.branch), quarter:qn, quarterLabel:'Q'+qn+' '+yr, year:yr, year:yr,
   from:V('fFrom').value,to:V('fTo').value,
   children:+V('fChildren').value||0,men:+V('fMen').value||0,women:+V('fWomen').value||0,youth:+V('fYouth').value||0,total:+V('fTotal').value||0,
-  month:V('fMonth').value,numSundays:+V('fSundays').value||0,
-  sunday:{men:+V('fSmMen').value||0,yb:+V('fSmYb').value||0,wom:+V('fSmWom').value||0,yg:+V('fSmYg').value||0,ch:+V('fSmCh').value||0,vis:+V('fSmVis').value||0,total:+V('fSmTotal').value||0},
+  month:V('fMon1')?V('fMon1').value:'',numSundays:+V('fSundays').value||0,
+  sunday:sundayCollect(),
   highDate:V('fHighDate').value,highReason:V('fHighReason').value,
   weekdays:wd,crusades:V('fCrusades').value,crusadeLoc:V('fCrusadeLoc').value,
   revivals:rv,baptism:{count:V('fBaptCount').value,people:V('fBaptPeople').value,loc:V('fBaptLoc').value},
@@ -958,11 +1013,11 @@ function reportPreviewHtml(r,mode){
  h+='<div class="kv"><b>Total membership</b><span>'+esc(r.total)+'</span></div>';
  h+='<div class="kv"><b>Men</b><span>'+esc(r.men)+'</span></div><div class="kv"><b>Women</b><span>'+esc(r.women)+'</span></div>';
  h+='<div class="kv"><b>Youth</b><span>'+esc(r.youth)+'</span></div><div class="kv"><b>Children</b><span>'+esc(r.children)+'</span></div>';
- h+='<h4 style="margin:10px 0 4px">Sunday Attendance (Average)</h4>';
- h+='<div class="kv"><span>Men</span><span>'+esc(r.sunday.men)+'</span></div><div class="kv"><span>Youth Boys</span><span>'+esc(r.sunday.yb)+'</span></div>';
- h+='<div class="kv"><span>Women</span><span>'+esc(r.sunday.wom)+'</span></div><div class="kv"><span>Youth Girls</span><span>'+esc(r.sunday.yg)+'</span></div>';
- h+='<div class="kv"><span>Children</span><span>'+esc(r.sunday.ch)+'</span></div><div class="kv"><span>Visitor</span><span>'+esc(r.sunday.vis)+'</span></div>';
- h+='<div class="kv"><b>Sunday Total</b><span><b>'+esc(r.sunday.total)+'</b></span></div>';
+ h+='<h4 style="margin:10px 0 4px">Sunday Attendance (Average for Quarter)</h4>';
+ h+='<div class="kv"><span>Men</span><span>'+esc(r.sunday.men)+'</span></div><div class="kv"><span>Women</span><span>'+esc(r.sunday.wom)+'</span></div>';
+ h+='<div class="kv"><span>Children</span><span>'+esc(r.sunday.ch)+'</span></div><div class="kv"><span>Youth Boys</span><span>'+esc(r.sunday.yb)+'</span></div><div class="kv"><span>Youth Girls</span><span>'+esc(r.sunday.yg)+'</span></div>';
+ if(r.sunday.months&&r.sunday.months.length){h+='<div class="kv"><span>Monthly detail</span><span>'+r.sunday.months.map(function(mo){return mo.mon+' (M:'+mo.men+' W:'+mo.wom+' C:'+mo.ch+' YB:'+mo.yb+' YG:'+mo.yg+')';}).join(' &nbsp; ')+'</span></div>';}
+ h+='<div class="kv"><b>Sunday Total (Avg)</b><span><b>'+esc(r.sunday.total)+'</b></span></div>';
  h+='<h4 style="margin:10px 0 4px">Evening / Weekday Attendance (avg for quarter)</h4>';
  (r.weekdays||[]).forEach(function(w){h+='<div class="kv"><span>'+esc(w.day)+'</span><span>'+esc(w.att)+'</span></div>';});
  h+='<div class="kv"><span>Highest Sunday attendance</span><span>'+esc(r.highDate||'')+(r.highReason?' ('+esc(r.highReason)+')':'')+'</span></div>';
@@ -1090,8 +1145,9 @@ function renderLines(r){/* returns array of lines for export */
  push('1. Name of local church: '+r.branch);
  push('2. Total membership: '+r.total+'   (Men: '+r.men+' | Women: '+r.women+' | Youth: '+r.youth+' | Children: '+r.children+')');
  push('7a. Sunday Attendance (avg for quarter):');
- push('   Men: '+r.sunday.men+' | Youth Boys: '+r.sunday.yb+' | Women: '+r.sunday.wom+' | Youth Girls: '+r.sunday.yg+' | Children: '+r.sunday.ch+' | Visitor: '+r.sunday.vis+' | TOTAL: '+r.sunday.total);
- push('   No. of Sundays in month: '+(r.numSundays||0));
+ push('   Men: '+r.sunday.men+' | Women: '+r.sunday.wom+' | Children: '+r.sunday.ch+' | Youth Boys: '+r.sunday.yb+' | Youth Girls: '+r.sunday.yg+' | TOTAL: '+r.sunday.total);
+ (r.sunday.months||[]).forEach(function(mo){push('   '+mo.mon+' - Men: '+mo.men+' | Women: '+mo.wom+' | Children: '+mo.ch+' | Youth Boys: '+mo.yb+' | Youth Girls: '+mo.yg);});
+ push('   No. of Sundays in quarter: '+(r.numSundays||0));
  push('7b. Evening/Weekday Attendance (avg for quarter):');
  (r.weekdays||[]).forEach(function(w){push('   '+w.day+': '+w.att);});
  push('   Highest Sunday attendance on: '+(r.highDate||'')+'  Reason: '+(r.highReason||''));
