@@ -778,17 +778,24 @@ function resolveBranch(b){
  return b;
 }
 
-/* Build the 7a Sunday Attendance section: 3 months, each with Men/Women/Children/Youth Boys/Youth Girls. */
+/* Build the 7a Sunday Attendance section: quarter preset (Q1-Q4) + 3 months, each with Men/Women/Children/Youth Boys/Youth Girls. */
 function sunH(d){
  var dm=(d.sunday&&d.sunday.months)||[];
  function g(i,k){return dm[i]&&dm[i][k]!=null&&dm[i][k]!==''?dm[i][k]:'';}
+ var mono=['January','February','March','April','May','June','July','August','September','October','November','December'];
+ function qOf(ym){var mm=+String(ym).split('-')[1];return mm<=3?1:mm<=6?2:mm<=9?3:4;}
+ function fmtMon(ym){if(!ym)return '';var p=String(ym).split('-');return (mono[(+p[1])-1]||'')+' '+p[0];}
+ function monthLabel(g){var a=[fmtMon(g(0,'mon')),fmtMon(g(1,'mon')),fmtMon(g(2,'mon'))].filter(Boolean);return a.length?a.join(', '):'';}
+ var now=new Date();var curQ=qOf(now.getFullYear()+'-'+('0'+(now.getMonth()+1)).slice(-2));
+ var s0=g(0,'mon');var preQ=s0?qOf(s0):curQ;var preY=s0?+String(s0).split('-')[0]:now.getFullYear();
  var h='<div class="section-h"><span class="dot"></span><h3>7a. SUNDAY ATTENDANCE (Average for Quarter)</h3></div>'+
-  '<p class="muted" style="margin-bottom:8px">Select the 3 months of the quarter and enter the average attendance for each month under each category.</p>'+
+  '<p class="muted" style="margin-bottom:8px">Pick the quarter and year, then enter the average attendance for each of the 3 months under each category. The month names fill in automatically.</p>'+
   '<div class="grid3">'+
-   '<div class="form-group"><label>Month 1</label><input type="month" id="fMon1" value="'+esc(g(0,'mon'))+'" onchange="calcSundays()"></div>'+
-   '<div class="form-group"><label>Month 2</label><input type="month" id="fMon2" value="'+esc(g(1,'mon'))+'" onchange="calcSundays()"></div>'+
-   '<div class="form-group"><label>Month 3</label><input type="month" id="fMon3" value="'+esc(g(2,'mon'))+'" onchange="calcSundays()"></div>'+
+   '<div class="form-group"><label>Quarter</label><select id="fQPre" onchange="applyQuarterPreset()">'+[1,2,3,4].map(function(q){return '<option value="'+q+'"'+(q===preQ?' selected':'')+'>Q'+q+' ('+mono[(q-1)*3]+'-'+mono[(q-1)*3+2]+')</option>';}).join('')+'</select></div>'+
+   '<div class="form-group"><label>Year</label><input type="number" id="fQYear" min="2020" max="2100" value="'+preY+'" onchange="applyQuarterPreset()"></div>'+
+   '<div class="form-group"><label>Months</label><input id="fMonLbl" value="'+esc(monthLabel(g))+'" readonly style="background:#eef2fb;font-weight:600"></div>'+
   '</div>'+
+  '<input type="hidden" id="fMon1" value="'+esc(g(0,'mon'))+'"><input type="hidden" id="fMon2" value="'+esc(g(1,'mon'))+'"><input type="hidden" id="fMon3" value="'+esc(g(2,'mon'))+'">'+
   '<div style="overflow-x:auto;margin-top:8px"><table class="data"><tr><th>Category</th><th>Month 1</th><th>Month 2</th><th>Month 3</th><th>Quarter Average</th></tr>';
  var cats=[['Men','Men','men'],['Women','Wom','wom'],['Children','Ch','ch'],['Youth Boys','Yb','yb'],['Youth Girls','Yg','yg']];
  cats.forEach(function(c){
@@ -903,6 +910,9 @@ function buildForm(r){
  calcTotal();
  calcAvg();
  calcSundays();
+ // Fresh report: auto-fill the 3 months from the default quarter/year.
+ var fresh=!((d.sunday&&d.sunday.months)||[]).length;
+ if(fresh&&V('fQPre'))applyQuarterPreset();
 }
 var renderContext='new'; // 'new' or 'edit'
 function numField(id,label,val){return '<div class="form-group"><label>'+label+'</label><input type="number" id="'+id+'" value="'+esc(val==null?'':val)+'" oninput="calcTotal()"></div>';}
@@ -910,6 +920,15 @@ function fillTxt(arr,id,ph){document.getElementById(id).innerHTML='';if(!arr||!a
 function calcTotal(){
  var c=+V('fChildren').value||0,m=+V('fMen').value||0,w=+V('fWomen').value||0,y=+V('fYouth').value||0;
  var e=V('fTotal');if(e)e.value=c+m+w+y;
+}
+/* Apply the quarter preset: fills the 3 hidden month values + the month label and recalculates Sunday count. */
+function applyQuarterPreset(){
+ var q=+V('fQPre').value||1,y=+V('fQYear').value||new Date().getFullYear();
+ var starts={1:1,2:4,3:7,4:10}[q]||1;
+ var mono=['January','February','March','April','May','June','July','August','September','October','November','December'];
+ for(var i=0;i<3;i++){var mm=starts+i;var ym=y+'-'+('0'+mm).slice(-2);var el=V('fMon'+(i+1));if(el)el.value=ym;}
+ var lbl=V('fMonLbl');if(lbl)lbl.value=mono[starts-1]+' '+y+', '+mono[starts]+' '+y+', '+mono[starts+1]+' '+y;
+ calcSundays();
 }
 function calcSundays(){
  var tot=0;['fMon1','fMon2','fMon3'].forEach(function(id){var el=V(id);var m=el&&el.value;if(!m)return;var p=m.split('-');var yy=+p[0],mm=+p[1];var dt=new Date(yy,mm-1,1),c=0;while(dt.getMonth()===mm-1){if(dt.getDay()===0)c++;dt.setDate(dt.getDate()+1);}tot+=c;});var t=V('fSundays');if(t)t.value=tot;
