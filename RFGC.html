@@ -198,7 +198,7 @@ function setReports(v){CACHE.reports=v||[];save(LS.reports,CACHE.reports);fbAppl
 function setNato(v){CACHE.nato=v||{};save(LS.nato,CACHE.nato);fbApply('nato',CACHE.nato);}
 var LAST={branches:null,pastors:null,secs:null,reports:null,nato:null};
 function fbParse(k,snap){var v=snap.val();if(v==null)return null;
- if(k==='branches')return Object.keys(v);
+ if(k==='branches'){return Array.isArray(v)?v.slice():Object.keys(v);}
  if(k==='reports'||k==='pastors'||k==='secs')return Object.keys(v).map(function(id){return v[id];});
  if(k==='nato'){var o={};Object.keys(v).forEach(function(b){var mm=(v[b]&&v[b].members)||{};o[b]={members:Object.keys(mm).map(function(id){return mm[id];})};});return o;}
  return v;}
