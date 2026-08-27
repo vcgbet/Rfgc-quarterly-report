@@ -968,7 +968,7 @@ function collectReport(){
   branch:resolveBranch(session.obj.branch), quarter:qn, quarterLabel:'Q'+qn+' '+yr, year:yr, year:yr,
   from:V('fFrom').value,to:V('fTo').value,
   children:+V('fChildren').value||0,men:+V('fMen').value||0,women:+V('fWomen').value||0,youth:+V('fYouth').value||0,total:+V('fTotal').value||0,
-  month:V('fMon1')?V('fMon1').value:'',numSundays:+V('fSundays').value||0,
+  month:V('fMon1')?V('fMon1').value:'',numSundays:V('fSundays')?+V('fSundays').value||0:0,
   sunday:sundayCollect(),
   highDate:V('fHighDate').value,highReason:V('fHighReason').value,
   weekdays:wd,crusades:V('fCrusades').value,crusadeLoc:V('fCrusadeLoc').value,
