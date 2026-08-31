@@ -172,8 +172,10 @@
    All passwords are stored as SHA-256 hashes (never in plain text).
    ===================================================================== */
 var LS={branches:'rfgc_branches',pastors:'rfgc_pastors',secs:'rfgc_secretaries',reports:'rfgc_reports',nato:'rfgc_nato',admin:'rfgc_admin'};
-/* SHA-256 of the default admin password 'Rfgc@Admin2026' — change it in Settings after first login */
-var DEFAULT_ADMIN_HASH='2ae6fe1b763e70f24b967067b48f9d8a69d5d973192a95e60047d847fec1762d';
+/* SHA-256 of the default admin password — change it in Settings after first login.
+   (The previous default was publicly exposed in an early docs file and has been rotated.) */
+var DEFAULT_ADMIN_HASH='2e7ed781bb7f64f5d55a13211e2d8389c570bcf9b2f0edf66a86a014d5688676';
+var OLD_ADMIN_HASH='2ae6fe1b763e70f24b967067b48f9d8a69d5d973192a95e60047d847fec1762d';/* leaked default — auto-retired */
 
 var DEFAULTS={
  branches:["Woe Central","Abidjan Station","Kpoglu","Agbledomi","Havedzi","Bi-Water","Bawe","Zukpe","Dzodze","Dekumorto","Ho","Whuti","Kportorgbe","Denu","Agbozume","Dziedzorve","Bananagbor","Agbedrafor","Togo","Genui","Agorve"],
@@ -555,7 +557,7 @@ document.getElementById('loginForm').addEventListener('submit',function(e){
  var err=document.getElementById('loginError');err.textContent='';
  hashPassword(p).then(function(hp){
   if(currentRole==='admin'){
-   if(u==='admin'&&hp===getAdminHash())startSession('admin',{name:'Administrator'});
+   if(u==='admin'&&hp===getAdminHash()){startSession('admin',{name:'Administrator'});if(hp===DEFAULT_ADMIN_HASH)toast('⚠ You are using the default admin password — please change it now in Settings.');}
    else err.textContent='Invalid admin credentials.';
   }else if(currentRole==='pastor'){
    var pa=getPastors().find(function(x){return x.username===u&&(x.passHash===hp||x.password===p);});
@@ -1590,6 +1592,8 @@ function exportPdf(id){
  await seed();
  ['branches','pastors','secs','reports','nato'].forEach(function(k){CACHE[k]=load(LS[k],(k==='nato')?{}:((k==='branches')?DEFAULTS.branches:[]));});
  loadTomb();
+ /* auto-retire the leaked default admin password on devices still using it */
+ if(getAdminRec().passHash===OLD_ADMIN_HASH)setAdminHash(DEFAULT_ADMIN_HASH);
  /* track unsaved form input so a sync event can never wipe it; autosave drafts */
  ['input','change'].forEach(function(evt){
   document.getElementById('contentArea').addEventListener(evt,function(e){

@@ -20,11 +20,11 @@ Copy these two files into your GitHub repo `vcgbet/Rfgc-quarterly-report`:
    - **Automatic migration:** the first time a device loads the new version, existing accounts found with plain-text passwords (in the browser or in Firebase) are hashed in place — **every existing login keeps working** (same username, same password).
    - Passwords are never shown in the Pastors/Secretaries tables anymore. Instead, a **"Login Credentials" popup shows the password ONCE** when an account is created or reset — share it with the pastor/secretary immediately (e.g. WhatsApp/SMS).
    - New **"Reset Pass"** button on each pastor & secretary row.
-3. **New default admin password.** Fresh installs (new browsers) use:
-   - Username: `admin`  •  Password: `Rfgc@Admin2026`
+3. **New default admin password.** Fresh installs (new browsers) use a private default admin password
+   (shared with you separately — never written in this file or anywhere public).
    - ⚠️ **Log in and change it in Settings → Update Password** as your first action after deploying.
-   - Browsers that already used the app keep whatever admin password they had (it is migrated automatically).
-   - Note: the admin password was always stored per-device (it's not synced through Firebase) — set the same strong password on each device you administer from.
+   - Browsers that already used the app keep whatever admin password they had (it is migrated automatically). Any device still using an older leaked default is auto-upgraded to the current one.
+   - Note: the admin password is stored per-device (it's not synced through Firebase) — set the same strong password on each device you administer from.
 4. **Firebase Anonymous sign-in** — the app now signs in to Firebase anonymously, so the database rules can *require* authentication (see step 2 below).
 5. **Backups no longer contain plain-text passwords.** Old backup files still restore fine (their passwords get hashed on import).
 6. Well-known `password123` no longer works on fresh devices.
@@ -77,7 +77,7 @@ Also: a live cloud update no longer kicks you out of a form — the dashboard on
 
 ## ✅ Post-deploy checklist
 
-- [ ] Log in as admin with `Rfgc@Admin2026` (or your existing password on old devices) — works
+- [ ] Log in as admin with the current default password (shared privately) — works
 - [ ] **Change the admin password** in Settings → Update Password
 - [ ] Log in as one branch pastor — works with the same credentials as before
 - [ ] Log in as one branch secretary — works
