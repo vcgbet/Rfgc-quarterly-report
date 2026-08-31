@@ -1,0 +1,36 @@
+{
+  "_comment": "RFGC Quarterly Report — hardened Firebase Realtime Database rules. Paste into Firebase Console → Realtime Database → Rules → Publish. Requires 'Anonymous' sign-in provider to be ENABLED under Authentication → Sign-in method (the app signs in anonymously before touching the database).",
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "branches": {
+      "$branchName": {
+        ".validate": "newData.isBoolean()"
+      }
+    },
+    "pastors": {
+      "$id": {
+        ".validate": "newData.hasChildren(['id','name','branch','username','passHash'])"
+      }
+    },
+    "secs": {
+      "$id": {
+        ".validate": "newData.hasChildren(['id','name','username','passHash'])"
+      }
+    },
+    "reports": {
+      "$id": {
+        ".validate": "newData.hasChildren(['id','branch'])"
+      }
+    },
+    "nato": {
+      "$branchName": {
+        "members": {
+          "$id": {
+            ".validate": "newData.hasChildren(['id'])"
+          }
+        }
+      }
+    }
+  }
+}

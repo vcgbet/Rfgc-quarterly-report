@@ -4,9 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RHEMA FULL GOSPEL CHURCHES - Quarterly Report</title>
+<!-- RFGC Quarterly Report build v2.0 — secured (hashed passwords) + persistent (local-first sync) -->
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 <style>
   :root{--blue:#0b3d91;--gold:#c9a227;--navy:#081f4d;--light:#f4f6fb;--red:#c0392b;--green:#1e7d3c;}
@@ -166,9 +168,12 @@
 <script>
 /* =====================================================================
    RHEMA FULL GOSPEL CHURCHES — QUARTERLY REPORT SYSTEM (single-file app)
-   Persists all data in localStorage.
+   Persists all data in localStorage + Firebase Realtime Database.
+   All passwords are stored as SHA-256 hashes (never in plain text).
    ===================================================================== */
 var LS={branches:'rfgc_branches',pastors:'rfgc_pastors',secs:'rfgc_secretaries',reports:'rfgc_reports',nato:'rfgc_nato',admin:'rfgc_admin'};
+/* SHA-256 of the default admin password 'Rfgc@Admin2026' — change it in Settings after first login */
+var DEFAULT_ADMIN_HASH='2ae6fe1b763e70f24b967067b48f9d8a69d5d973192a95e60047d847fec1762d';
 
 var DEFAULTS={
  branches:["Woe Central","Abidjan Station","Kpoglu","Agbledomi","Havedzi","Bi-Water","Bawe","Zukpe","Dzodze","Dekumorto","Ho","Whuti","Kportorgbe","Denu","Agbozume","Dziedzorve","Bananagbor","Agbedrafor","Togo","Genui","Agorve"],
@@ -203,12 +208,189 @@ function fbParse(k,snap){var v=snap.val();if(v==null)return null;
  if(k==='nato'){var o={};Object.keys(v).forEach(function(b){var mm=(v[b]&&v[b].members)||{};o[b]={members:Object.keys(mm).map(function(id){return mm[id];})};});return o;}
  return v;}
 function fbApply(k,val){var old=LAST[k],updates={};
- if(k==='branches'){var os={};(old||[]).forEach(function(n){os[n]=1;});var ns={};(val||[]).forEach(function(n){ns[n]=1;});Object.keys(ns).forEach(function(n){if(!os[n])updates['branches/'+n]=true;});Object.keys(os).forEach(function(n){if(!ns[n])updates['branches/'+n]=null;});}
- else if(k==='reports'||k==='pastors'||k==='secs'){var om={};(old||[]).forEach(function(r){om[r.id]=r;});var nm={};(val||[]).forEach(function(r){nm[r.id]=r;});Object.keys(nm).forEach(function(id){if(!om[id]||JSON.stringify(om[id])!==JSON.stringify(nm[id]))updates[k+'/'+id]=nm[id];});Object.keys(om).forEach(function(id){if(!nm[id])updates[k+'/'+id]=null;});}
- else if(k==='nato'){var prev={},cur={};Object.keys(old||{}).forEach(function(b){prev[b]={};(old[b].members||[]).forEach(function(m){prev[b][m.id]=m;});});Object.keys(val||{}).forEach(function(b){cur[b]={};(val[b].members||[]).forEach(function(m){cur[b][m.id]=m;});});Object.keys(cur).forEach(function(b){Object.keys(cur[b]).forEach(function(mid){if(!prev[b]||!prev[b][mid]||JSON.stringify(prev[b][mid])!==JSON.stringify(cur[b][mid]))updates['nato/'+b+'/members/'+mid]=cur[b][mid];});});Object.keys(prev).forEach(function(b){if(!cur[b]){updates['nato/'+b]=null;return;}Object.keys(prev[b]).forEach(function(mid){if(!cur[b][mid])updates['nato/'+b+'/members/'+mid]=null;});});}
- LAST[k]=val;
- if(!_fb||!Object.keys(updates).length)return;_fb.ref().update(updates);}
+ if(k==='branches'){var os={};(old||[]).forEach(function(n){os[n]=1;});var ns={};(val||[]).forEach(function(n){ns[n]=1;});Object.keys(ns).forEach(function(n){if(!os[n])updates['branches/'+n]=true;});Object.keys(os).forEach(function(n){if(!ns[n]){updates['branches/'+n]=null;TOMB.branches[n]=1;}});}
+ else if(k==='reports'||k==='pastors'||k==='secs'){var om={};(old||[]).forEach(function(r){om[r.id]=r;});var nm={};(val||[]).forEach(function(r){nm[r.id]=r;});Object.keys(nm).forEach(function(id){if(!om[id]||JSON.stringify(om[id])!==JSON.stringify(nm[id]))updates[k+'/'+id]=nm[id];});Object.keys(om).forEach(function(id){if(!nm[id]){updates[k+'/'+id]=null;TOMB[k][id]=1;}});}
+ else if(k==='nato'){var prev={},cur={};Object.keys(old||{}).forEach(function(b){prev[b]={};(old[b].members||[]).forEach(function(m){prev[b][m.id]=m;});});Object.keys(val||{}).forEach(function(b){cur[b]={};(val[b].members||[]).forEach(function(m){cur[b][m.id]=m;});});Object.keys(cur).forEach(function(b){Object.keys(cur[b]).forEach(function(mid){if(!prev[b]||!prev[b][mid]||JSON.stringify(prev[b][mid])!==JSON.stringify(cur[b][mid]))updates['nato/'+b+'/members/'+mid]=cur[b][mid];});});Object.keys(prev).forEach(function(b){if(!cur[b]){updates['nato/'+b]=null;return;}Object.keys(prev[b]).forEach(function(mid){if(!cur[b][mid]){updates['nato/'+b+'/members/'+mid]=null;if(!TOMB.nato[b])TOMB.nato[b]={};TOMB.nato[b][mid]=1;}});});}
+ LAST[k]=val;saveTomb();
+ if(!_fb||!Object.keys(updates).length)return;
+ try{
+  var pr=_fb.ref().update(updates);
+  if(pr&&pr.catch)pr.catch(function(){SYNC_PENDING=true;toastOnce('Saved on this device — will sync to the cloud automatically when back online.');});
+ }catch(e){SYNC_PENDING=true;}
+}
 function fbSeedEmpty(k){var v=CACHE[k],updates={};if(k==='branches'){(v||[]).forEach(function(n){updates['branches/'+n]=true;});}else if(k==='reports'||k==='pastors'||k==='secs'){(v||[]).forEach(function(x){updates[k+'/'+x.id]=x;});}else if(k==='nato'){Object.keys(v||{}).forEach(function(b){(v[b].members||[]).forEach(function(m){updates['nato/'+b+'/members/'+m.id]=m;});});}if(_fb&&Object.keys(updates).length)_fb.ref().update(updates);}
+/* ===== ONE-TIME MIGRATION: hash any plain-text passwords found ===== */
+function secureMigrate(){
+ var jobs=[];
+ ['pastors','secs'].forEach(function(k){
+  var list=CACHE[k]||[];
+  var todo=list.filter(function(x){return x&&x.password;});
+  if(todo.length){
+   jobs.push(Promise.all(todo.map(function(x){
+    return hashPassword(x.password).then(function(h){x.passHash=h;delete x.password;});
+   })).then(function(){
+    /* push fresh copies so the Firebase diff detects the change */
+    if(k==='pastors')setPastors(CACHE.pastors.map(ocopy));
+    else setSecs(CACHE.secs.map(ocopy));
+    console.log('Migrated '+todo.length+' '+k+' account(s) to hashed passwords.');
+   }));
+  }
+ });
+ var rec=getAdminRec();
+ if(rec&&rec.pass){jobs.push(hashPassword(rec.pass).then(function(h){setAdminHash(h);}));}
+ return Promise.all(jobs);
+}
+/* =====================================================================
+   PERSISTENCE GUARANTEES — submitted data must never be lost.
+   localStorage is the durable source; Firebase is the sync layer.
+   - Remote snapshots are MERGED with local data, so a report saved on
+     this device can never be wiped by a snapshot that lacks it.
+   - Deletes are recorded as tombstones so a stale snapshot cannot
+     resurrect a deleted record, and are re-pushed until confirmed.
+   - Failed syncs are queued and retried automatically on reconnect.
+   ===================================================================== */
+var TOMB={branches:{},reports:{},pastors:{},secs:{},nato:{}};
+var SYNC_PENDING=false;
+function loadTomb(){try{var v=JSON.parse(localStorage.getItem('rfgc_tombstones')||'{}');if(v&&typeof v==='object'){['branches','reports','pastors','secs','nato'].forEach(function(k){TOMB[k]=v[k]||{};});}}catch(e){}}
+function saveTomb(){save('rfgc_tombstones',{branches:TOMB.branches,reports:TOMB.reports,pastors:TOMB.pastors,secs:TOMB.secs,nato:TOMB.nato});}
+var _lastToast={msg:'',t:0};
+function toastOnce(msg){var now=Date.now();if(msg===_lastToast.msg&&now-_lastToast.t<6000)return;_lastToast={msg:msg,t:now};toast(msg);}
+/* merge a remote snapshot with local state: union by id, remote wins on
+   conflicts, local-only records survive, tombstoned records stay deleted */
+function mergeRemote(k,remote){
+ var local=CACHE[k]||[];
+ if(k==='branches'){
+  var raw={};(remote||[]).forEach(function(n){raw[n]=1;});
+  var rem=(remote||[]).filter(function(n){return !TOMB.branches[n];});
+  var names={};rem.forEach(function(n){names[n]=1;});
+  local.forEach(function(n){if(!names[n]&&!TOMB.branches[n]){rem.push(n);names[n]=1;}});
+  /* tombstone confirmed only when the server snapshot no longer has the name */
+  Object.keys(TOMB.branches).forEach(function(n){if(!raw[n])delete TOMB.branches[n];});
+  saveTomb();return rem;
+ }
+ if(k==='reports'||k==='pastors'||k==='secs'){
+  var rawIds={};(remote||[]).forEach(function(x){rawIds[x.id]=1;});
+  var out=[],seen={};
+  (remote||[]).forEach(function(x){
+   if(TOMB[k][x.id]||seen[x.id])return;
+   seen[x.id]=1;out.push(x);
+  });
+  local.forEach(function(x){if(x&&x.id&&!seen[x.id]&&!TOMB[k][x.id]){out.push(x);seen[x.id]=1;}});
+  /* tombstone confirmed only when the server snapshot no longer has the id */
+  Object.keys(TOMB[k]).forEach(function(id){if(!rawIds[id])delete TOMB[k][id];});
+  saveTomb();return out;
+ }
+ if(k==='nato'){
+  var res={};
+  Object.keys(remote||{}).forEach(function(b){
+   var ms=((remote[b]||{}).members||[]).filter(function(m){return !(TOMB.nato[b]&&TOMB.nato[b][m.id]);});
+   res[b]={members:ms};
+  });
+  Object.keys(local||{}).forEach(function(b){
+   if(!res[b])res[b]={members:[]};
+   var mids={};res[b].members.forEach(function(m){mids[m.id]=1;});
+   (local[b].members||[]).forEach(function(m){
+    if(!mids[m.id]&&!(TOMB.nato[b]&&TOMB.nato[b][m.id])){res[b].members.push(m);mids[m.id]=1;}
+   });
+  });
+  Object.keys(TOMB.nato).forEach(function(b){
+   var remM={};(((remote||{})[b]||{}).members||[]).forEach(function(m){remM[m.id]=1;});
+   Object.keys(TOMB.nato[b]).forEach(function(mid){if(!remM[mid])delete TOMB.nato[b][mid];});
+   if(!Object.keys(TOMB.nato[b]).length)delete TOMB.nato[b];
+  });
+  saveTomb();return res;
+ }
+ return remote;
+}
+function pushTombstones(k){
+ if(!_fb)return;var updates={},n=0;
+ Object.keys(TOMB[k]||{}).forEach(function(id){updates[k+'/'+id]=null;n++;});
+ if(k==='nato'||k==='reports'||k==='pastors'||k==='secs'||k==='branches'){
+  Object.keys(TOMB.nato||{}).forEach(function(b){Object.keys(TOMB.nato[b]).forEach(function(mid){updates['nato/'+b+'/members/'+mid]=null;n++;});});
+ }
+ if(!n)return;
+ try{
+  var pr=_fb.ref().update(updates);
+  if(pr&&pr.catch)pr.catch(function(){SYNC_PENDING=true;});
+ }catch(e){SYNC_PENDING=true;}
+}
+function retryPendingSync(){
+ if(!_fb||!SYNC_PENDING)return;
+ SYNC_PENDING=false;
+ var hadTomb=Object.keys(TOMB.reports).length+Object.keys(TOMB.pastors).length+Object.keys(TOMB.secs).length+Object.keys(TOMB.branches).length;
+ ['branches','pastors','secs','reports','nato'].forEach(function(k){fbApply(k,CACHE[k]);});
+ if(hadTomb)pushTombstones('all');
+ toast('Back online — your data is synced.');
+}
+/* re-render the CURRENT view only, and never while a modal is open or a
+   form has unsaved input — sync events must not wipe user work */
+var CURRENT_VIEW_FN=null,PENDING_RERENDER=false,FORM_DIRTY=false;
+function anyModalOpen(){
+ if(document.getElementById('appModal'))return true;
+ var sm=document.getElementById('sigModal');
+ if(sm&&sm.classList&&sm.classList.contains&&sm.classList.contains('hidden')===false)return true;
+ return false;
+}
+function refreshView(){
+ if(!session)return;
+ if(anyModalOpen()||FORM_DIRTY){PENDING_RERENDER=true;return;}
+ PENDING_RERENDER=false;
+ if(CURRENT_VIEW_FN)CURRENT_VIEW_FN();else renderContent();
+}
+/* ===== DRAFT AUTOSAVE (secretary's unsubmitted report form) ===== */
+function draftKey(){return 'rfgc_draft_'+(session&&session.obj?session.obj.id:'anon');}
+var DRAFT_TIMER=null;
+function scheduleDraftSave(){if(DRAFT_TIMER)clearTimeout(DRAFT_TIMER);DRAFT_TIMER=setTimeout(saveDraftNow,400);}
+function saveDraftNow(){
+ if(!session||session.type!=='secretary'||editContext)return;
+ var f=document.getElementById('reportForm');if(!f)return;
+ var fields=f.querySelectorAll('input,select,textarea'),d={},any=false;
+ Array.prototype.forEach.call(fields,function(el){
+  if(!el.id)return;
+  d[el.id]=el.value;
+  if(el.value!==''&&el.type!=='hidden')any=true;
+  if(el.value!==''&&el.type==='hidden')any=true;
+ });
+ if(!any){localStorage.removeItem(draftKey());return;}
+ save(draftKey(),d);
+}
+function restoreDraftInto(){
+ if(!session||session.type!=='secretary'||editContext)return;
+ var d=load(draftKey(),null);if(!d)return;
+ var filled=Object.keys(d).filter(function(id){return d[id]!=='';});
+ if(!filled.length){localStorage.removeItem(draftKey());return;}
+ var restored=0;
+ Object.keys(d).forEach(function(id){var el=document.getElementById(id);if(el){el.value=d[id];restored++;}});
+ if(!restored)return;
+ FORM_DIRTY=true;
+ var box=document.getElementById('reportForm');
+ if(box){
+  var note=document.createElement('div');note.className='nato';note.style.marginBottom='10px';
+  note.innerHTML='📝 <b>Unsubmitted draft restored.</b> It was saved automatically on this device. <a href="#" onclick="discardDraft();return false;">Discard draft</a>';
+  box.insertBefore(note,box.firstChild);
+ }
+ toast('Draft restored — continue where you stopped.');
+}
+function discardDraft(){localStorage.removeItem(draftKey());FORM_DIRTY=false;toast('Draft discarded.');renderNewReport();}
+function clearDraft(){localStorage.removeItem(draftKey());FORM_DIRTY=false;}
+/* ===== SESSION PERSISTENCE (stay logged in across refresh/restart) ===== */
+var SESS_KEY='rfgc_session',SESS_DAYS=14;
+function persistSession(){
+ if(session)save(SESS_KEY,{type:session.type,obj:session.obj,exp:Date.now()+SESS_DAYS*864e5});
+}
+function restoreSession(){
+ var s=load(SESS_KEY,null);
+ if(!s||!s.exp||s.exp<Date.now()||!s.obj){localStorage.removeItem(SESS_KEY);return false;}
+ var obj=s.obj;
+ if(s.type==='pastor'){var pa=getPastors().find(function(x){return x.id===s.obj.id;});if(!pa){localStorage.removeItem(SESS_KEY);return false;}obj=pa;}
+ else if(s.type==='secretary'){var sc=getSecs().find(function(x){return x.id===s.obj.id;});if(!sc){localStorage.removeItem(SESS_KEY);return false;}obj=sc;}
+ session={type:s.type,obj:obj};
+ document.getElementById('loginPage').classList.add('hidden');
+ document.getElementById('appPage').classList.remove('hidden');
+ document.getElementById('roleChip').textContent=s.type==='admin'?'ADMIN':s.type==='pastor'?'BRANCH PASTOR':'BRANCH SECRETARY';
+ renderContent();
+ return true;
+}
 /* ===== FIREBASE CENTRAL DATABASE ===== */
 var FB_CONFIG = {"apiKey":"AIzaSyDkZQJIGfiMBII6CDQzq1aGyLb2MbaFX7c","authDomain":"rfgc-report-system.firebaseapp.com","databaseURL":"https://rfgc-report-system-default-rtdb.firebaseio.com","projectId":"rfgc-report-system","storageBucket":"rfgc-report-system.firebasestorage.app","messagingSenderId":"682698617634","appId":"1:682698617634:web:ed1a945078760f1671eb7b"};
 var _fb=null;
@@ -217,36 +399,137 @@ function fbInit(){
  try{
   firebase.initializeApp(FB_CONFIG);
   _fb=firebase.database();
-  ['branches','pastors','secs','reports','nato'].forEach(function(k){
-   _fb.ref(k).on('value',function(snap){
-    var v=fbParse(k,snap);
-    if(v===null){fbSeedEmpty(k);v=CACHE[k];}
-    CACHE[k]=v;LAST[k]=v;save(LS[k],v);
-    if(session)renderContent();
-   },function(err){console.warn('fb err',err);});
-  });
-  console.log('Firebase connected');
+  var attach=function(){
+   /* auto-retry anything that failed while offline */
+   _fb.ref('.info/connected').on('value',function(s){if(s.val()===true)retryPendingSync();});
+   ['branches','pastors','secs','reports','nato'].forEach(function(k){
+    _fb.ref(k).on('value',function(snap){
+     var v=fbParse(k,snap);
+     if(v===null)v=(k==='nato')?{}:(k==='branches'?[]:[]);
+     v=mergeRemote(k,v);            /* never let a snapshot wipe local records */
+     if(k==='branches')setBranches(v);
+     else if(k==='pastors')setPastors(v);
+     else if(k==='secs')setSecs(v);
+     else if(k==='reports')setReports(v);
+     else setNato(v);
+     pushTombstones(k);             /* keep re-pushing deletes until confirmed */
+     if(session)refreshView();
+     secureMigrate();               /* hash any legacy records from old devices */
+    },function(err){
+     console.warn('fb err',err);
+     toastOnce('Cannot reach the online database — working from this device. Data is safe and will sync later.');
+    });
+   });
+   console.log('Firebase connected');
+  };
+  /* sign in anonymously so database rules can require auth != null */
+  if(typeof firebase.auth==='function'){
+   firebase.auth().signInAnonymously().then(attach).catch(function(e){
+    console.warn('Anonymous sign-in failed (enable it in Firebase console → Authentication → Sign-in method). Falling back to open access:',e&&e.message);
+    attach();
+   });
+  }else attach();
  }catch(e){console.warn('Firebase init failed',e);}
 }
-function getAdminPass(){var c=load(LS.admin,{});return c.pass||'password123';}
-function setAdminPass(p){save(LS.admin,{pass:p});}
+/* ===== PASSWORD HASHING (SHA-256) ===== */
+function _sha256_js(ascii){
+ function rightRotate(v,a){return (v>>>a)|(v<<(32-a));}
+ var mathPow=Math.pow,maxWord=mathPow(2,32),result='',words=[],asciiBitLength=ascii.length*8;
+ var hash=_sha256_js.h=_sha256_js.h||[],k=_sha256_js.k=_sha256_js.k||[],primeCounter=k.length;
+ var isComposite={};
+ for(var candidate=2;primeCounter<64;candidate++){
+  if(!isComposite[candidate]){
+   for(var i=0;i<313;i+=candidate)isComposite[i]=candidate;
+   hash[primeCounter]=(mathPow(candidate,.5)*maxWord)|0;
+   k[primeCounter++]=(mathPow(candidate,1/3)*maxWord)|0;
+  }
+ }
+ ascii+= '\x80';
+ while(ascii.length%64-56)ascii+='\x00';
+ for(i=0;i<ascii.length;i++){
+  var j=ascii.charCodeAt(i);
+  if(j>>8)return '';
+  words[i>>2]|=j<<((3-i)%4)*8;
+ }
+ words[words.length]=(asciiBitLength/maxWord)|0;
+ words[words.length]=asciiBitLength;
+ for(j=0;j<words.length;){
+  var w=words.slice(j,j+=16),oldHash=hash;
+  hash=hash.slice(0,8);
+  for(i=0;i<64;i++){
+   var w15=w[i-15],w2=w[i-2];
+   var a=hash[0],e=hash[4];
+   var temp1=hash[7]
+    +(rightRotate(e,6)^rightRotate(e,11)^rightRotate(e,25))
+    +((e&hash[5])^((~e)&hash[6]))
+    +k[i]
+    +(w[i]=(i<16)?w[i]:(w[i-16]+(rightRotate(w15,7)^rightRotate(w15,18)^(w15>>>3))+w[i-7]+(rightRotate(w2,17)^rightRotate(w2,19)^(w2>>>10)))|0);
+   var temp2=(rightRotate(a,2)^rightRotate(a,13)^rightRotate(a,22))+((a&hash[1])^(a&hash[2])^(hash[1]&hash[2]));
+   hash=[(temp1+temp2)|0].concat(hash);
+   hash[4]=(hash[4]+temp1)|0;
+  }
+  for(i=0;i<8;i++)hash[i]=(hash[i]+oldHash[i])|0;
+ }
+ for(i=0;i<8;i++){
+  for(j=3;j+1;j--){
+   var b=(hash[i]>>(j*8))&255;
+   result+=((b<16)?0:'')+b.toString(16);
+  }
+ }
+ return result;
+}
+/* encode a JS string to its UTF-8 bytes as a binary (latin1) string */
+function _toUtf8(s){
+ var out='',i,c;
+ for(i=0;i<s.length;i++){
+  c=s.codePointAt(i);
+  if(c>0xFFFF)i++;/* surrogate pair */
+  if(c<0x80)out+=String.fromCharCode(c);
+  else if(c<0x800)out+=String.fromCharCode(0xC0|(c>>6),0x80|(c&63));
+  else if(c<0x10000)out+=String.fromCharCode(0xE0|(c>>12),0x80|((c>>6)&63),0x80|(c&63));
+  else out+=String.fromCharCode(0xF0|(c>>18),0x80|((c>>12)&63),0x80|((c>>6)&63),0x80|(c&63));
+ }
+ return out;
+}
+function hashPassword(pw){
+ pw=String(pw==null?'':pw);
+ try{
+  if(typeof crypto!=='undefined'&&crypto.subtle&&crypto.subtle.digest&&typeof TextEncoder!=='undefined'){
+   return crypto.subtle.digest('SHA-256',new TextEncoder().encode(pw)).then(function(buf){
+    var a=new Uint8Array(buf),out='',i;
+    for(i=0;i<a.length;i++)out+=(a[i]<16?'0':'')+a[i].toString(16);
+    return out;
+   });
+  }
+ }catch(e){}
+ /* fallback: encode to UTF-8 bytes first so results match the WebCrypto path */
+ return Promise.resolve(_sha256_js(_toUtf8(pw)));
+}
+function ocopy(o){var c={},k;for(k in o)c[k]=o[k];return c;}
+
+function getAdminRec(){return load(LS.admin,{});}
+function getAdminHash(){var c=getAdminRec();return c.passHash||DEFAULT_ADMIN_HASH;}
+function setAdminHash(h){save(LS.admin,{passHash:h});}
+function setAdminPass(p){return hashPassword(p).then(function(h){setAdminHash(h);});}
 function uid(){return 'id_'+Date.now().toString(36)+Math.random().toString(36).slice(2,7);}
 function surnameOf(name){var p=name.trim().split(/\s+/).filter(Boolean);return p.length?p[p.length-1].toLowerCase():'user';}
 function genLogin(name){var s=surnameOf(name);return {username:s,password:s+'12@'};}
-function makePastor(name,branch){var g=genLogin(name);return {id:uid(),name:name,branch:branch,username:g.username,password:g.password};}
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
 
-function seed(){
+async function seed(){
  if(!localStorage.getItem(LS.branches))setBranches(DEFAULTS.branches);
  if(!localStorage.getItem(LS.pastors)){
   var ps=[];
-  DEFAULTS.pastors.forEach(function(p){var g=genLogin(p[0]);ps.push({id:'def_'+p[1].toLowerCase().replace(/[^a-z0-9]+/g,'_'),name:p[0],branch:p[1],username:g.username,password:g.password});});
+  for(var i=0;i<DEFAULTS.pastors.length;i++){
+   var p=DEFAULTS.pastors[i],g=genLogin(p[0]);
+   ps.push({id:'def_'+p[1].toLowerCase().replace(/[^a-z0-9]+/g,'_'),name:p[0],branch:p[1],username:g.username,passHash:await hashPassword(g.password)});
+  }
   setPastors(ps);
  }
  if(!localStorage.getItem(LS.secs))setSecs([]);
  if(!localStorage.getItem(LS.reports))setReports([]);
  if(!localStorage.getItem(LS.nato))setNato({});
- if(!localStorage.getItem(LS.admin))setAdminPass('password123');
+ if(!localStorage.getItem(LS.admin))setAdminHash(DEFAULT_ADMIN_HASH);
 }
 
 /* ============ session ============ */
@@ -270,29 +553,32 @@ document.getElementById('loginForm').addEventListener('submit',function(e){
  var u=document.getElementById('username').value.trim().toLowerCase();
  var p=document.getElementById('password').value;
  var err=document.getElementById('loginError');err.textContent='';
- if(currentRole==='admin'){
-  if(u==='admin'&&p===getAdminPass())startSession('admin',{name:'Administrator'});
-  else err.textContent='Invalid admin credentials.';
- }else if(currentRole==='pastor'){
-  var pa=getPastors().find(function(x){return x.username===u&&x.password===p;});
-  if(pa)startSession('pastor',pa);else err.textContent='Invalid pastor credentials.';
- }else{
-  var s=getSecs().find(function(x){return x.username===u&&x.password===p;});
-  if(s)startSession('secretary',s);else err.textContent='Invalid secretary credentials.';
- }
+ hashPassword(p).then(function(hp){
+  if(currentRole==='admin'){
+   if(u==='admin'&&hp===getAdminHash())startSession('admin',{name:'Administrator'});
+   else err.textContent='Invalid admin credentials.';
+  }else if(currentRole==='pastor'){
+   var pa=getPastors().find(function(x){return x.username===u&&(x.passHash===hp||x.password===p);});
+   if(pa)startSession('pastor',pa);else err.textContent='Invalid pastor credentials.';
+  }else{
+   var s=getSecs().find(function(x){return x.username===u&&(x.passHash===hp||x.password===p);});
+   if(s)startSession('secretary',s);else err.textContent='Invalid secretary credentials.';
+  }
+ });
 });
 ['username','password'].forEach(function(id){
  document.getElementById(id).addEventListener('input',function(){document.getElementById('loginError').textContent='';});
 });
 function startSession(type,obj){
  session={type:type,obj:obj};
+ persistSession();
  document.getElementById('loginPage').classList.add('hidden');
  document.getElementById('appPage').classList.remove('hidden');
  document.getElementById('roleChip').textContent=
   type==='admin'?'ADMIN':type==='pastor'?'BRANCH PASTOR':'BRANCH SECRETARY';
  renderContent();
 }
-function logout(){session=null;document.getElementById('appPage').classList.add('hidden');document.getElementById('loginPage').classList.remove('hidden');document.getElementById('username').value='';document.getElementById('password').value='';document.getElementById('loginError').textContent='';}
+function logout(){session=null;CURRENT_VIEW_FN=null;PENDING_RERENDER=false;FORM_DIRTY=false;localStorage.removeItem(SESS_KEY);document.getElementById('appPage').classList.add('hidden');document.getElementById('loginPage').classList.remove('hidden');document.getElementById('username').value='';document.getElementById('password').value='';document.getElementById('loginError').textContent='';}
 
 /* ============ nav ============ */
 function setNav(list){
@@ -304,7 +590,7 @@ function setNav(list){
   nb.appendChild(b);
  });
 }
-function nav(list){setNav(list);}
+function nav(list){setNav(list);var act=list.filter(function(n){return n.active;})[0];if(act)CURRENT_VIEW_FN=act.fn;}
 function navActive(label,list){list.forEach(function(n){n.active=(n.label===label);});renderNav(list);}
 function renderNav(list){var nb=document.getElementById('navBar');nb.innerHTML='';list.forEach(function(n){var b=document.createElement('button');b.textContent=n.label;if(n.active)b.className='active';b.onclick=function(){navActive(n.label,list);n.fn();};nb.appendChild(b);});}
 
@@ -426,15 +712,16 @@ function saveAdminPass(){
  var cur=document.getElementById('curPass').value;
  var np=document.getElementById('newPass').value;
  var cp=document.getElementById('confPass').value;
- if(cur!==getAdminPass()){err.textContent='Current password is incorrect.';return;}
- if(np.length<6){err.textContent='New password must be at least 6 characters.';return;}
- if(np!==cp){err.textContent='New passwords do not match.';return;}
- setAdminPass(np);toast('Admin password updated successfully.');
- renderAdminSettings();
+ hashPassword(cur).then(function(hc){
+  if(hc!==getAdminHash()){err.textContent='Current password is incorrect.';return;}
+  if(np.length<6){err.textContent='New password must be at least 6 characters.';return;}
+  if(np!==cp){err.textContent='New passwords do not match.';return;}
+  setAdminPass(np).then(function(){toast('Admin password updated successfully.');renderAdminSettings();});
+ });
 }
 function backupData(){
  var d={};
- d.branches=getBranches();d.pastors=getPastors();d.secs=getSecs();d.reports=getReports();d.nato=getNato();d.admin=getAdminPass();
+ d.branches=getBranches();d.pastors=getPastors();d.secs=getSecs();d.reports=getReports();d.nato=getNato();d.adminHash=getAdminRec().passHash||null;
  return d;
 }
 function exportAllData(){
@@ -452,7 +739,9 @@ function importAllData(file){
    if(!d||typeof d!=='object'||!Array.isArray(d.branches)){alert('Invalid backup file. Please choose an RFGC backup (.json).');return;}
    setBranches(d.branches||[]);setPastors(d.pastors||[]);setSecs(d.secs||[]);
    setReports(d.reports||[]);setNato(d.nato||{});
-   if(d.admin)setAdminPass(d.admin);
+   if(d.adminHash)setAdminHash(d.adminHash);
+   else if(d.admin)setAdminPass(d.admin);/* old backup with plain-text password: hash it */
+   secureMigrate();
    toast('Backup restored successfully.');
    renderAdminSettings();
   }catch(e){alert('Could not read backup file: '+e.message);}
@@ -539,15 +828,47 @@ function delBranch(idx){
 function renderAdminPastors(){
  nav([{label:'Dashboard',active:false,fn:renderAdmin},{label:'Branches',active:false,fn:renderAdminBranches},{label:'Pastors',active:true,fn:renderAdminPastors},{label:'Endorsed Reports',active:false,fn:renderAdminReports},{label:'National Overview',active:false,fn:renderAdminOverview},{label:'Settings',active:false,fn:renderAdminSettings}]);
  var a=document.getElementById('contentArea');
- a.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h2 style="margin:0">Manage Pastors &amp; Login Details</h2><button class="btn btn-primary" onclick="openPastor()">+ Add Pastor</button></div><p class="muted" style="margin-top:8px">Login auto-generated: username = pastor surname; password = surname + two numbers + a symbol.</p><div id="pastorList" style="margin-top:12px"></div></div>';
+ a.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h2 style="margin:0">Manage Pastors &amp; Login Details</h2><button class="btn btn-primary" onclick="openPastor()">+ Add Pastor</button></div><p class="muted" style="margin-top:8px">Login auto-generated: username = pastor surname; password = surname + two numbers + a symbol. Passwords are stored as secure hashes and shown <b>only once</b> when created or reset.</p><div id="pastorList" style="margin-top:12px"></div></div>';
  renderPastorList();
 }
 function renderPastorList(){
  var box=document.getElementById('pastorList');var ps=getPastors();
  if(!ps.length){box.innerHTML='<div class="empty">No pastors.</div>';return;}
- var h='<table class="data"><tr><th>#</th><th>Name</th><th>Branch</th><th>Username</th><th>Password</th><th>Actions</th></tr>';
- ps.forEach(function(p,i){h+='<tr><td>'+(i+1)+'</td><td><b>'+esc(p.name)+'</b></td><td>'+esc(p.branch)+'</td><td>'+esc(p.username)+'</td><td>'+esc(p.password)+'</td><td><div class="row-actions"><button class="btn btn-gray btn-sm" onclick="openPastor(\''+p.id+'\')">Edit</button><button class="btn btn-red btn-sm" onclick="delPastor(\''+p.id+'\')">Delete</button></div></td></tr>';});
+ var h='<table class="data"><tr><th>#</th><th>Name</th><th>Branch</th><th>Username</th><th>Actions</th></tr>';
+ ps.forEach(function(p,i){h+='<tr><td>'+(i+1)+'</td><td><b>'+esc(p.name)+'</b></td><td>'+esc(p.branch)+'</td><td>'+esc(p.username)+'</td><td><div class="row-actions"><button class="btn btn-gray btn-sm" onclick="openPastor(\''+p.id+'\')">Edit</button><button class="btn btn-gold btn-sm" onclick="openResetPass(\'pastor\',\''+p.id+'\')">Reset Pass</button><button class="btn btn-red btn-sm" onclick="delPastor(\''+p.id+'\')">Delete</button></div></td></tr>';});
  h+='</table>';box.innerHTML=h;
+}
+function showCreds(name,user,pw){
+ var m=mkModal('<div class="modal-head"><h2>Login Credentials</h2><button class="close-x" onclick="closeModal()">×</button></div>'+
+  '<p style="margin-bottom:10px">Login details for <b>'+esc(name)+'</b>:</p>'+
+  '<div class="kv"><span>Username</span><b>'+esc(user)+'</b></div>'+
+  '<div class="kv"><span>Password</span><b>'+esc(pw)+'</b></div>'+
+  '<p class="muted" style="margin-top:12px">For security, passwords are stored as one-way hashes and <b>cannot be viewed again</b>. Share these details with the user now (e.g. via WhatsApp or SMS).</p>'+
+  '<div style="display:flex;justify-content:flex-end;margin-top:14px"><button class="btn btn-primary" onclick="closeModal()">Done</button></div>','sm');
+ document.body.appendChild(m);
+}
+function openResetPass(kind,id){
+ var it=(kind==='pastor'?getPastors():getSecs()).find(function(x){return x.id===id;});
+ if(!it)return;
+ var sug=surnameOf(it.name)+'12@';
+ var m=mkModal('<div class="modal-head"><h2>Reset Password</h2><button class="close-x" onclick="closeModal()">×</button></div>'+
+  '<p style="margin-bottom:10px">Set a new password for <b>'+esc(it.name)+'</b> <span class="muted">('+esc(it.username)+')</span>.</p>'+
+  '<div class="form-group"><label>New Password</label><input id="rpPass" value="'+esc(sug)+'"></div>'+
+  '<p class="muted">It will be shown once after saving so you can share it.</p>'+
+  '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px"><button class="btn btn-gray" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="doResetPass(\''+kind+'\',\''+id+'\')">Save Password</button></div>','sm');
+ document.body.appendChild(m);
+}
+function doResetPass(kind,id){
+ var input=document.getElementById('rpPass');var nw=input?input.value:'';
+ if(!nw||nw.length<6){toast('Password must be at least 6 characters.');return;}
+ var it=(kind==='pastor'?getPastors():getSecs()).find(function(x){return x.id===id;});
+ if(!it)return;
+ hashPassword(nw).then(function(h){
+  it.passHash=h;delete it.password;
+  if(kind==='pastor')setPastors(getPastors());else setSecs(getSecs());
+  closeModal();showCreds(it.name,it.username,nw);
+  if(kind==='pastor')renderAdminPastors();else renderPastorSecs();
+ });
 }
 function openPastor(id){
  var p=id?getPastors().find(function(x){return x.id===id;}):null;
@@ -555,8 +876,8 @@ function openPastor(id){
  var m=mkModal('<div class="modal-head"><h2>'+(p?'Edit Pastor':'Add Pastor')+'</h2><button class="close-x" onclick="closeModal()">×</button></div>'+
   '<div class="form-group"><label>Pastor Name</label><input id="pName" value="'+esc(p?p.name:'')+'"></div>'+
   '<div class="form-group"><label>Branch</label><select id="pBranch">'+branchOpts+'</select></div>'+
-  '<div class="grid2"><div class="form-group"><label>Username</label><input id="pUser" value="'+esc(p?p.username:'')+'"></div><div class="form-group"><label>Password</label><input id="pPass" value="'+esc(p?p.password:'')+'"></div></div>'+
-  '<p class="muted">Leave blank to auto-generate.</p>'+
+  '<div class="grid2"><div class="form-group"><label>Username</label><input id="pUser" value="'+esc(p?p.username:'')+'"></div><div class="form-group"><label>'+(p?'New Password':'Password')+'</label><input id="pPass" value="" placeholder="'+(p?'Leave blank to keep current':'Leave blank to auto-generate')+'"></div></div>'+
+  '<p class="muted">'+(p?'Leave the password blank to keep the current one.':'Auto-generated: surname + two numbers + a symbol.')+' Passwords are shown once after saving.</p>'+
   '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-gray" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="savePastor(\''+(p?p.id:'')+'\')">Save</button></div>','sm');
  document.body.appendChild(m);
 }
@@ -564,9 +885,20 @@ function savePastor(id){
  var name=document.getElementById('pName').value.trim();if(!name){return;}
  var branch=document.getElementById('pBranch').value;
  var ps=getPastors();
- if(id){var p=ps.find(function(x){return x.id===id;});p.name=name;p.branch=branch;p.username=document.getElementById('pUser').value.trim()||p.username;p.password=document.getElementById('pPass').value||p.password;}
- else{var u=document.getElementById('pUser').value.trim(),pw=document.getElementById('pPass').value.trim(),g=genLogin(name);ps.push({id:uid(),name:name,branch:branch,username:u||g.username,password:pw||g.password});}
- setPastors(ps);closeModal();renderAdminPastors();
+ var rawPw=document.getElementById('pPass').value;
+ if(id){
+  var p=ps.find(function(x){return x.id===id;});
+  p.name=name;p.branch=branch;p.username=document.getElementById('pUser').value.trim()||p.username;
+  if(rawPw){hashPassword(rawPw).then(function(h){p.passHash=h;delete p.password;setPastors(ps);closeModal();renderAdminPastors();toast('Password updated.');});}
+  else{setPastors(ps);closeModal();renderAdminPastors();}
+ }else{
+  var u=document.getElementById('pUser').value.trim(),pw=rawPw.trim(),g=genLogin(name);
+  var user=u||g.username,plain=pw||g.password;
+  hashPassword(plain).then(function(h){
+   ps.push({id:uid(),name:name,branch:branch,username:user,passHash:h});
+   setPastors(ps);closeModal();renderAdminPastors();showCreds(name,user,plain);
+  });
+ }
 }
 function delPastor(id){if(!confirm('Delete this pastor? They lose access.'))return;setPastors(getPastors().filter(function(p){return p.id!==id;}));renderAdminPastors();}
 
@@ -602,23 +934,34 @@ function renderPastorSecs(){
  a.innerHTML='<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px"><h2 style="margin:0">Branch Secretaries</h2><button class="btn btn-primary" onclick="openSec()">+ Add Secretary</button></div><p class="muted" style="margin-top:8px">Create your Branch Secretary and generate their login details.</p><div id="secList" style="margin-top:12px"></div></div>';
  var box=document.getElementById('secList');
  if(!secs.length){box.innerHTML='<div class="empty">No secretaries added yet.</div>';}
- else{var h='<table class="data"><tr><th>Name</th><th>Username</th><th>Password</th><th>Actions</th></tr>';secs.forEach(function(s){h+='<tr><td><b>'+esc(s.name)+'</b></td><td>'+esc(s.username)+'</td><td>'+esc(s.password)+'</td><td><div class="row-actions"><button class="btn btn-gray btn-sm" onclick="openSec(\''+s.id+'\')">Edit</button><button class="btn btn-red btn-sm" onclick="delSec(\''+s.id+'\')">Delete</button></div></td></tr>';});h+='</table>';box.innerHTML=h;}
+ else{var h='<table class="data"><tr><th>Name</th><th>Username</th><th>Actions</th></tr>';secs.forEach(function(s){h+='<tr><td><b>'+esc(s.name)+'</b></td><td>'+esc(s.username)+'</td><td><div class="row-actions"><button class="btn btn-gray btn-sm" onclick="openSec(\''+s.id+'\')">Edit</button><button class="btn btn-gold btn-sm" onclick="openResetPass(\'sec\',\''+s.id+'\')">Reset Pass</button><button class="btn btn-red btn-sm" onclick="delSec(\''+s.id+'\')">Delete</button></div></td></tr>';});h+='</table>';box.innerHTML=h;}
 }
 function openSec(id){
  var s=id?getSecs().find(function(x){return x.id===id;}):null;
  var m=mkModal('<div class="modal-head"><h2>'+(s?'Edit Secretary':'Add Branch Secretary')+'</h2><button class="close-x" onclick="closeModal()">×</button></div>'+
   '<div class="form-group"><label>Secretary Name</label><input id="sName" value="'+esc(s?s.name:'')+'"></div>'+
-  '<div class="grid2"><div class="form-group"><label>Username</label><input id="sUser" value="'+esc(s?s.username:'')+'"></div><div class="form-group"><label>Password</label><input id="sPass" value="'+esc(s?s.password:'')+'"></div></div>'+
-  '<p class="muted">Leave blank to auto-generate (surname + two numbers + symbol).</p>'+
+  '<div class="grid2"><div class="form-group"><label>Username</label><input id="sUser" value="'+esc(s?s.username:'')+'"></div><div class="form-group"><label>'+(s?'New Password':'Password')+'</label><input id="sPass" value="" placeholder="'+(s?'Leave blank to keep current':'Leave blank to auto-generate')+'"></div></div>'+
+  '<p class="muted">'+(s?'Leave the password blank to keep the current one.':'Auto-generated: surname + two numbers + symbol.')+' Passwords are shown once after saving.</p>'+
   '<div style="display:flex;gap:10px;justify-content:flex-end"><button class="btn btn-gray" onclick="closeModal()">Cancel</button><button class="btn btn-primary" onclick="saveSec(\''+(s?s.id:'')+'\')">Save</button></div>','sm');
  document.body.appendChild(m);
 }
 function saveSec(id){
  var name=document.getElementById('sName').value.trim();if(!name){return;}
  var secs=getSecs();
- if(id){var s=secs.find(function(x){return x.id===id;});s.name=name;s.username=document.getElementById('sUser').value.trim()||s.username;s.password=document.getElementById('sPass').value||s.password;}
- else{var u=document.getElementById('sUser').value.trim(),pw=document.getElementById('sPass').value.trim(),g=genLogin(name);secs.push({id:uid(),pastorId:session.obj.id,branch:session.obj.branch,name:name,username:u||g.username,password:pw||g.password});}
- setSecs(secs);closeModal();renderPastorSecs();
+ var rawPw=document.getElementById('sPass').value;
+ if(id){
+  var s=secs.find(function(x){return x.id===id;});
+  s.name=name;s.username=document.getElementById('sUser').value.trim()||s.username;
+  if(rawPw){hashPassword(rawPw).then(function(h){s.passHash=h;delete s.password;setSecs(secs);closeModal();renderPastorSecs();toast('Password updated.');});}
+  else{setSecs(secs);closeModal();renderPastorSecs();}
+ }else{
+  var u=document.getElementById('sUser').value.trim(),pw=rawPw.trim(),g=genLogin(name);
+  var user=u||g.username,plain=pw||g.password;
+  hashPassword(plain).then(function(h){
+   secs.push({id:uid(),pastorId:session.obj.id,branch:session.obj.branch,name:name,username:user,passHash:h});
+   setSecs(secs);closeModal();renderPastorSecs();showCreds(name,user,plain);
+  });
+ }
 }
 function delSec(id){if(!confirm('Delete this secretary?'))return;setSecs(getSecs().filter(function(s){return s.id!==id;}));renderPastorSecs();}
 
@@ -763,10 +1106,11 @@ function renderMySubmissions(){
 var editContext=null; // {reportId} when editing existing
 function renderNewReport(){
  nav([{label:'Dashboard',active:false,fn:renderSecret},{label:'New Report',active:true,fn:renderNewReport},{label:'My Submissions',active:false,fn:renderMySubmissions},{label:'National Convention',active:false,fn:renderNatoSec}]);
- editContext=null;
+ editContext=null;FORM_DIRTY=false;
  var a=document.getElementById('contentArea');
  a.innerHTML='<div class="card"><div id="reportForm"></div></div>';
  buildForm(null);
+ restoreDraftInto();
 }
 
 /* Return the exact branch name as entered in the Admin Dashboard's Branches list. */
@@ -998,6 +1342,7 @@ function submitReport(){
    quarterLabel:rep.quarterLabel,status:'submitted',secSignature:sig,secDate:date,date:date};
   Object.keys(rep).forEach(function(k){r[k]=rep[k];});
   var list=getReports();list.push(r);setReports(list);
+  clearDraft();
   toast('Report submitted to your Branch Pastor.');renderMySubmissions();
  });
 }
@@ -1139,7 +1484,7 @@ function saveSig(){
  if(!date){alert('Select the date.');return;}
  if(sigCtx)sigCtx(data,date);sigCtx=null;closeSig();
 }
-function closeSig(){document.getElementById('sigModal').classList.add('hidden');}
+function closeSig(){document.getElementById('sigModal').classList.add('hidden');if(PENDING_RERENDER&&session&&!anyModalOpen()&&!FORM_DIRTY){PENDING_RERENDER=false;renderContent();}}
 
 /* =====================================================================
    MODAL helpers
@@ -1149,7 +1494,7 @@ function mkModal(inner,size){
  var m=document.createElement('div');m.className='modal '+(size||'');m.innerHTML=inner;
  bd.appendChild(m);return bd;
 }
-function closeModal(){var m=document.getElementById('appModal');if(m)m.remove();}
+function closeModal(){var m=document.getElementById('appModal');if(m)m.remove();if(PENDING_RERENDER&&session&&!anyModalOpen()&&!FORM_DIRTY){PENDING_RERENDER=false;renderContent();}}
 function toast(msg){var t=document.createElement('div');t.style.cssText='position:fixed;bottom:20px;right:20px;background:var(--green);color:#fff;padding:12px 18px;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.3);z-index:500;font-weight:600';t.textContent=msg;document.body.appendChild(t);setTimeout(function(){t.remove();},2600);}
 
 /* =====================================================================
@@ -1241,9 +1586,21 @@ function exportPdf(id){
 /* =====================================================================
    bootstrap
    ===================================================================== */
-seed();
-['branches','pastors','secs','reports','nato'].forEach(function(k){CACHE[k]=load(LS[k],(k==='nato')?{}:((k==='branches')?DEFAULTS.branches:[]));});
-fbInit();
+(async function(){
+ await seed();
+ ['branches','pastors','secs','reports','nato'].forEach(function(k){CACHE[k]=load(LS[k],(k==='nato')?{}:((k==='branches')?DEFAULTS.branches:[]));});
+ loadTomb();
+ /* track unsaved form input so a sync event can never wipe it; autosave drafts */
+ ['input','change'].forEach(function(evt){
+  document.getElementById('contentArea').addEventListener(evt,function(e){
+   var t=e.target;
+   if(t&&t.id&&t.closest&&t.closest('#reportForm')){FORM_DIRTY=true;scheduleDraftSave();}
+  });
+ });
+ await secureMigrate();
+ restoreSession();
+ fbInit();
+})();
 </script>
 </body>
 </html>
