@@ -1548,8 +1548,9 @@ function renderLines(r){/* returns array of lines for export */
  push('How to achieve: '+(r.how||[]).join('; '));
  push('================================================================');
  push('E. SIGNATURES');
- push('Church Secretary: '+(r.secName||'')+'  Signed on: '+(r.secDate||''));
- push('Branch Pastor: '+(r.pastorName||'')+'  Signed on: '+(r.pastorDate||''));
+ push('Church Secretary: '+(r.secName||'')+'  Signed on: '+(r.secDate||'')+(sigIsImage(r.secSignature)?'':'  [not yet signed]'));
+ push('Branch Pastor: '+(r.pastorName||'')+'  Signed on: '+(r.pastorDate||'')+(sigIsImage(r.pastorSignature)?'':'  [not yet signed]'));
+ push('(Signatures appear above their underlines in PDF and Word exports)');
  push('================================================================');
  push('NATIONAL ANNUAL CONVENTION REGISTRATION (annual)');
  var n=getNato();var key=(r.branch)+'_'+(r.year||new Date().getFullYear());
@@ -1561,11 +1562,34 @@ function renderLines(r){/* returns array of lines for export */
  return L;
 }
 function downloadBlob(blob,name){var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},200);}
+/* ===== signature helpers for exports ===== */
+function sigIsImage(s){return typeof s==='string'&&s.indexOf('data:image')===0&&s.indexOf('base64,')>0;}
+function sigB64(s){return s.substring(s.indexOf('base64,')+7);}
+/* DOCX: append signature image paragraphs to the paragraph list */
+function docxPushSig(paras,r){
+ if(!sigIsImage(r.secSignature)&&!sigIsImage(r.pastorSignature))return;
+ paras.push(new docx.Paragraph({text:'',spacing:{after:80}}));
+ if(sigIsImage(r.secSignature)){
+  try{
+   paras.push(new docx.Paragraph({children:[new docx.ImageRun({data:sigB64(r.secSignature),transformation:{width:180,height:70}})],spacing:{after:20}}));
+  }catch(e){}
+ }
+ if(sigIsImage(r.pastorSignature)){
+  try{
+   paras.push(new docx.Paragraph({children:[new docx.ImageRun({data:sigB64(r.pastorSignature),transformation:{width:180,height:70}})],spacing:{after:20}}));
+  }catch(e){}
+ }
+}
 function exportDocx(id){
  var r=getReports().find(function(x){return x.id===id;});if(!r)return;
  if(typeof docx==='undefined'){alert('docx library not loaded. Check internet connection.');return;}
  var lines=renderLines(r);
- var paras=lines.map(function(l){return new docx.Paragraph({text:l,spacing:{after:60},bold:l.indexOf('RHEMA')===0||l.indexOf('QUARTERLY')===0||l.indexOf('===')===0||/^[A-CDE]\./.test(l)});});
+ var paras=[];
+ lines.forEach(function(l){
+  paras.push(new docx.Paragraph({text:l,spacing:{after:60},bold:l.indexOf('RHEMA')===0||l.indexOf('QUARTERLY')===0||l.indexOf('===')===0||/^[A-CDE]\./.test(l)}));
+  /* insert both signature images right after the "Branch Pastor:" line in section E */
+  if(l.indexOf('Branch Pastor:')===0)docxPushSig(paras,r);
+ });
  var d=new docx.Document({sections:[{children:paras}]});
  docx.Packer.toBlob(d).then(function(b){downloadBlob(b,'RFGC_Quarterly_Report_'+r.branch+'_'+r.quarterLabel+'.docx');});
 }
@@ -1573,14 +1597,24 @@ function exportPdf(id){
  var r=getReports().find(function(x){return x.id===id;});if(!r)return;
  if(typeof window.jspdf==='undefined'){alert('PDF library not loaded. Check internet connection.');return;}
  var doc=new window.jspdf.jsPDF();
+ var SIG_W=52,SIG_H=20;
+ /* draw one signature image under the given line; returns vertical space used */
+ function pdfSig(dataUrl,yy){
+  try{doc.addImage(dataUrl,'PNG',14,yy,SIG_W,SIG_H);}catch(e){return 0;}
+  doc.setDrawColor(180);doc.line(14,yy+SIG_H+1,14+SIG_W,yy+SIG_H+1);
+  return SIG_H+6;
+ }
  doc.setFontSize(16);doc.setFont('helvetica','bold');
  doc.text('RHEMA FULL GOSPEL CHURCHES',105,16,{align:'center'});
  doc.setFontSize(10);doc.setFont('helvetica','normal');
  doc.text('QUARTERLY REPORT FROM LOCAL CHURCH THROUGH THE DISTRICT',105,22,{align:'center'});
  var lines=renderLines(r);var y=30;
  lines.forEach(function(l){
-  if(y>275){doc.addPage();y=20;}
+  if(y>262){doc.addPage();y=20;}
   doc.text(l,14,y);y+=5;
+  /* draw signatures in section E */
+  if(l.indexOf('Church Secretary:')===0&&sigIsImage(r.secSignature)){y+=pdfSig(r.secSignature,y+2);}
+  else if(l.indexOf('Branch Pastor:')===0&&sigIsImage(r.pastorSignature)){y+=pdfSig(r.pastorSignature,y+2);}
  });
  doc.save('RFGC_Quarterly_Report_'+r.branch+'_'+r.quarterLabel+'.pdf');
 }
