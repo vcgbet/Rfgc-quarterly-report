@@ -375,6 +375,15 @@ function restoreDraftInto(){
 }
 function discardDraft(){localStorage.removeItem(draftKey());FORM_DIRTY=false;toast('Draft discarded.');renderNewReport();}
 function clearDraft(){localStorage.removeItem(draftKey());FORM_DIRTY=false;}
+/* explicit Save as Draft: writes the draft immediately and returns to the dashboard */
+function saveDraftBtn(){
+ if(!session||session.type!=='secretary')return;
+ if(DRAFT_TIMER){clearTimeout(DRAFT_TIMER);DRAFT_TIMER=null;}
+ saveDraftNow();
+ FORM_DIRTY=false;
+ toast('Draft saved on this device. Continue anytime from your Dashboard.');
+ renderSecret();
+}
 /* ===== SESSION PERSISTENCE (stay logged in across refresh/restart) ===== */
 var SESS_KEY='rfgc_session',SESS_DAYS=14;
 function persistSession(){
@@ -1082,8 +1091,11 @@ function renderSecret(){
  nav([{label:'Dashboard',active:true,fn:renderSecret},{label:'New Report',active:false,fn:renderNewReport},{label:'My Submissions',active:false,fn:renderMySubmissions},{label:'National Convention',active:false,fn:renderNatoSec}]);
  var s=session.obj;var my=getReports().filter(function(r){return r.secId===s.id;});
  var a=document.getElementById('contentArea');
+ var _d=load(draftKey(),null),_hasDraft=false;
+ if(_d){Object.keys(_d).forEach(function(k){if(_d[k]!=='')_hasDraft=true;});}
  a.innerHTML='<div class="card"><h2>Welcome, '+esc(s.name)+'</h2><p class="muted">Branch: <b>'+esc(s.branch)+'</b></p></div>'+
  '<div class="grid3">'+cardStat(my.length,'Total Reports','blue')+cardStat(my.filter(function(r){return r.status==="submitted";}).length,'Submitted','gold')+cardStat(my.filter(function(r){return r.status==="endorsed";}).length,'Endorsed','green')+'</div>'+
+ (_hasDraft?'<div class="nato" style="margin-bottom:14px"><b>Unfinished draft report</b><p class="muted" style="margin:6px 0 10px">Your partially completed report is saved safely on this device. Finish and submit it when ready (e.g. in the last month of the quarter).</p><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-primary" onclick="renderNewReport()">Resume Draft</button><button class="btn btn-gray" onclick="discardDraft()">Discard Draft</button></div></div>':'')+
  '<div class="card"><button class="btn btn-primary btn-block" onclick="renderNewReport()">Start New Quarterly Report</button></div>';
 }
 function renderNatoSec(){
@@ -1143,7 +1155,7 @@ function sunH(d){
   '</div>'+
   '<input type="hidden" id="fMon1" value="'+esc(g(0,'mon'))+'"><input type="hidden" id="fMon2" value="'+esc(g(1,'mon'))+'"><input type="hidden" id="fMon3" value="'+esc(g(2,'mon'))+'">'+
   '<div style="overflow-x:auto;margin-top:8px"><table class="data"><tr><th>Category</th><th>Month 1</th><th>Month 2</th><th>Month 3</th><th>Quarter Average</th></tr>';
- var cats=[['Men','Men','men'],['Women','Wom','wom'],['Children','Ch','ch'],['Youth Boys','Yb','yb'],['Youth Girls','Yg','yg']];
+ var cats=[['Men','Men','men'],['Women','Wom','wom'],['Children','Ch','ch'],['Youth Boys','Yb','yb'],['Youth Girls','Yg','yg'],['Visitors','Vis','vis']];
  cats.forEach(function(c){
   h+='<tr><td><b>'+c[0]+'</b></td>'+
    '<td><input type="number" min="0" id="fSm'+c[1]+'1" value="'+esc(g(0,c[2]))+'" oninput="calcAvg()"></td>'+
@@ -1157,7 +1169,7 @@ function sunH(d){
 
 /* Auto-calculate quarter averages and total for Sunday attendance. */
 function calcAvg(){
- var keys=[['Men','Men'],['Wom','Wom'],['Ch','Ch'],['Yb','Yb'],['Yg','Yg']];
+ var keys=[['Men','Men'],['Wom','Wom'],['Ch','Ch'],['Yb','Yb'],['Yg','Yg'],['Vis','Vis']];
  var total=0;
  keys.forEach(function(k){
   var sum=0,cnt=0;
@@ -1172,10 +1184,10 @@ function calcAvg(){
 /* Collect the 3-month Sunday attendance from the form. */
 function sundayCollect(){
  function m(i){return V('fMon'+i)?V('fMon'+i).value:'';}
- var cats=[['men','Men'],['wom','Wom'],['ch','Ch'],['yb','Yb'],['yg','Yg']];
+ var cats=[['men','Men'],['wom','Wom'],['ch','Ch'],['yb','Yb'],['yg','Yg'],['vis','Vis']];
  var months=[];
  for(var i=1;i<=3;i++){var o={mon:m(i)};cats.forEach(function(c){o[c[0]]=V('fSm'+c[1]+i)?+V('fSm'+c[1]+i).value||0:0;});months.push(o);}
- return {months:months,men:+V('fAvgMen').value||0,wom:+V('fAvgWom').value||0,ch:+V('fAvgCh').value||0,yb:+V('fAvgYb').value||0,yg:+V('fAvgYg').value||0,vis:0,total:+V('fAvgTotal').value||0};
+ return {months:months,men:+V('fAvgMen').value||0,wom:+V('fAvgWom').value||0,ch:+V('fAvgCh').value||0,yb:+V('fAvgYb').value||0,yg:+V('fAvgYg').value||0,vis:+V('fAvgVis').value||0,total:+V('fAvgTotal').value||0};
 }
 
 function buildForm(r){
@@ -1234,7 +1246,7 @@ function buildForm(r){
   '<div class="form-group"><label>3. Vision for next quarter</label><div id="visRows"></div><button class="btn btn-gray btn-sm" onclick="addTxtRow(\'visRows\',\'Vision\')">+ Add</button></div>'+
   '<div class="form-group"><label>4. How to achieve the visions</label><div id="howRows"></div><button class="btn btn-gray btn-sm" onclick="addTxtRow(\'howRows\',\'How\')">+ Add</button></div>'+
   // action
-  '<div style="text-align:center;margin-top:18px"><button class="btn btn-primary" style="padding:14px 36px;font-size:16px" onclick="submitReport()">'+(renderContext==='pastor'?'Save Changes':'Save &amp; Submit to Branch Pastor')+'</button></div>';
+  '<div style="text-align:center;margin-top:18px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap"><button class="btn btn-primary" style="padding:14px 36px;font-size:16px" onclick="submitReport()">'+(renderContext==='pastor'?'Save Changes':'Save &amp; Submit to Branch Pastor')+'</button>'+(session.type==='secretary'&&!editContext?'<button class="btn btn-gray" style="padding:14px 28px;font-size:15px" onclick="saveDraftBtn()">Save as Draft</button>':'')+'</div>';
  // populate dynamic rows
  var wd=d.weekdays||[];
  document.getElementById('wdRows').innerHTML='';
@@ -1382,8 +1394,8 @@ function reportPreviewHtml(r,mode){
  h+='<div class="kv"><b>Youth</b><span>'+esc(r.youth)+'</span></div><div class="kv"><b>Children</b><span>'+esc(r.children)+'</span></div>';
  h+='<h4 style="margin:10px 0 4px">Sunday Attendance (Average for Quarter)</h4>';
  h+='<div class="kv"><span>Men</span><span>'+esc(r.sunday.men)+'</span></div><div class="kv"><span>Women</span><span>'+esc(r.sunday.wom)+'</span></div>';
- h+='<div class="kv"><span>Children</span><span>'+esc(r.sunday.ch)+'</span></div><div class="kv"><span>Youth Boys</span><span>'+esc(r.sunday.yb)+'</span></div><div class="kv"><span>Youth Girls</span><span>'+esc(r.sunday.yg)+'</span></div>';
- if(r.sunday.months&&r.sunday.months.length){h+='<div class="kv"><span>Monthly detail</span><span>'+r.sunday.months.map(function(mo){return mo.mon+' (M:'+mo.men+' W:'+mo.wom+' C:'+mo.ch+' YB:'+mo.yb+' YG:'+mo.yg+')';}).join(' &nbsp; ')+'</span></div>';}
+ h+='<div class="kv"><span>Children</span><span>'+esc(r.sunday.ch)+'</span></div><div class="kv"><span>Youth Boys</span><span>'+esc(r.sunday.yb)+'</span></div><div class="kv"><span>Youth Girls</span><span>'+esc(r.sunday.yg)+'</span></div><div class="kv"><span>Visitors</span><span>'+esc(r.sunday.vis!=null?r.sunday.vis:'')+'</span></div>';
+ if(r.sunday.months&&r.sunday.months.length){h+='<div class="kv"><span>Monthly detail</span><span>'+r.sunday.months.map(function(mo){return mo.mon+' (M:'+mo.men+' W:'+mo.wom+' C:'+mo.ch+' YB:'+mo.yb+' YG:'+mo.yg+' V:'+(mo.vis||0)+')';}).join(' &nbsp; ')+'</span></div>';}
  h+='<div class="kv"><b>Sunday Total (Avg)</b><span><b>'+esc(r.sunday.total)+'</b></span></div>';
  h+='<h4 style="margin:10px 0 4px">Evening / Weekday Attendance (avg for quarter)</h4>';
  (r.weekdays||[]).forEach(function(w){h+='<div class="kv"><span>'+esc(w.day)+'</span><span>'+esc(w.att)+'</span></div>';});
@@ -1512,8 +1524,8 @@ function renderLines(r){/* returns array of lines for export */
  push('1. Name of local church: '+r.branch);
  push('2. Total membership: '+r.total+'   (Men: '+r.men+' | Women: '+r.women+' | Youth: '+r.youth+' | Children: '+r.children+')');
  push('7a. Sunday Attendance (avg for quarter):');
- push('   Men: '+r.sunday.men+' | Women: '+r.sunday.wom+' | Children: '+r.sunday.ch+' | Youth Boys: '+r.sunday.yb+' | Youth Girls: '+r.sunday.yg+' | TOTAL: '+r.sunday.total);
- (r.sunday.months||[]).forEach(function(mo){push('   '+mo.mon+' - Men: '+mo.men+' | Women: '+mo.wom+' | Children: '+mo.ch+' | Youth Boys: '+mo.yb+' | Youth Girls: '+mo.yg);});
+ push('   Men: '+r.sunday.men+' | Women: '+r.sunday.wom+' | Children: '+r.sunday.ch+' | Youth Boys: '+r.sunday.yb+' | Youth Girls: '+r.sunday.yg+' | Visitors: '+(r.sunday.vis!=null?r.sunday.vis:0)+' | TOTAL: '+r.sunday.total);
+ (r.sunday.months||[]).forEach(function(mo){push('   '+mo.mon+' - Men: '+mo.men+' | Women: '+mo.wom+' | Children: '+mo.ch+' | Youth Boys: '+mo.yb+' | Youth Girls: '+mo.yg+' | Visitors: '+(mo.vis||0));});
  push('   No. of Sundays in quarter: '+(r.numSundays||0));
  push('7b. Evening/Weekday Attendance (avg for quarter):');
  (r.weekdays||[]).forEach(function(w){push('   '+w.day+': '+w.att);});
