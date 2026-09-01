@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RHEMA FULL GOSPEL CHURCHES - Quarterly Report</title>
-<!-- RFGC Quarterly Report build v2.0 — secured (hashed passwords) + persistent (local-first sync) -->
+<!-- RFGC Quarterly Report build v2.3 — draft saves all sections, password resets sync, branch Edit fixed, numeric branches purged -->
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js" defer></script>
 <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js" defer></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
@@ -209,11 +209,15 @@ function fbParse(k,snap){var v=snap.val();if(v==null)return null;
  if(k==='reports'||k==='pastors'||k==='secs')return Object.keys(v).map(function(id){return v[id];});
  if(k==='nato'){var o={};Object.keys(v).forEach(function(b){var mm=(v[b]&&v[b].members)||{};o[b]={members:Object.keys(mm).map(function(id){return mm[id];})};});return o;}
  return v;}
-function fbApply(k,val){var old=LAST[k],updates={};
+function fbApply(k,val){
+ /* deep-clone the previous state: code mutates records in place, so a live
+    reference would make every change look like "no change" and never sync */
+ var old=LAST[k]==null?null:JSON.parse(JSON.stringify(LAST[k])),updates={};
  if(k==='branches'){var os={};(old||[]).forEach(function(n){os[n]=1;});var ns={};(val||[]).forEach(function(n){ns[n]=1;});Object.keys(ns).forEach(function(n){if(!os[n])updates['branches/'+n]=true;});Object.keys(os).forEach(function(n){if(!ns[n]){updates['branches/'+n]=null;TOMB.branches[n]=1;}});}
  else if(k==='reports'||k==='pastors'||k==='secs'){var om={};(old||[]).forEach(function(r){om[r.id]=r;});var nm={};(val||[]).forEach(function(r){nm[r.id]=r;});Object.keys(nm).forEach(function(id){if(!om[id]||JSON.stringify(om[id])!==JSON.stringify(nm[id]))updates[k+'/'+id]=nm[id];});Object.keys(om).forEach(function(id){if(!nm[id]){updates[k+'/'+id]=null;TOMB[k][id]=1;}});}
  else if(k==='nato'){var prev={},cur={};Object.keys(old||{}).forEach(function(b){prev[b]={};(old[b].members||[]).forEach(function(m){prev[b][m.id]=m;});});Object.keys(val||{}).forEach(function(b){cur[b]={};(val[b].members||[]).forEach(function(m){cur[b][m.id]=m;});});Object.keys(cur).forEach(function(b){Object.keys(cur[b]).forEach(function(mid){if(!prev[b]||!prev[b][mid]||JSON.stringify(prev[b][mid])!==JSON.stringify(cur[b][mid]))updates['nato/'+b+'/members/'+mid]=cur[b][mid];});});Object.keys(prev).forEach(function(b){if(!cur[b]){updates['nato/'+b]=null;return;}Object.keys(prev[b]).forEach(function(mid){if(!cur[b][mid]){updates['nato/'+b+'/members/'+mid]=null;if(!TOMB.nato[b])TOMB.nato[b]={};TOMB.nato[b][mid]=1;}});});}
- LAST[k]=val;saveTomb();
+ LAST[k]=JSON.parse(JSON.stringify(val==null?null:val));saveTomb(); /* detached snapshot: later in-place edits can not rewrite history */
+ try{window.__lastUpdates=updates;}catch(e){}
  if(!_fb||!Object.keys(updates).length)return;
  try{
   var pr=_fb.ref().update(updates);
@@ -316,6 +320,16 @@ function pushTombstones(k){
   if(pr&&pr.catch)pr.catch(function(){SYNC_PENDING=true;});
  }catch(e){SYNC_PENDING=true;}
 }
+/* remove invalid branch names (e.g. stray "1", "2", "3" entries) — tombstoned
+   so they can not be resurrected by stale snapshots */
+function cleanupNumericBranches(){
+ var bs=getBranches()||[];
+ var bad=bs.filter(function(n){return /^[0-9]+$/.test(String(n).trim());});
+ if(!bad.length)return 0;
+ setBranches(bs.filter(function(n){return !/^[0-9]+$/.test(String(n).trim());}));
+ console.log('Removed invalid numeric branch name(s): '+bad.join(', '));
+ return bad.length;
+}
 function retryPendingSync(){
  if(!_fb||!SYNC_PENDING)return;
  SYNC_PENDING=false;
@@ -353,6 +367,21 @@ function saveDraftNow(){
   if(el.value!==''&&el.type!=='hidden')any=true;
   if(el.value!==''&&el.type==='hidden')any=true;
  });
+ /* row-based sections (Financial, Welfare marriages, Weekdays, Revivals,
+    Achievements...) have no input ids — capture them structurally */
+ var rows={};
+ try{
+  rows.finTithe=readFin('finTithe');rows.finLevy=readFin('finLevy');
+  rows.marriages=readFin('marRows');
+  var _wd=[];document.querySelectorAll('#wdRows .grid3').forEach(function(r){var sel=r.querySelector('select'),num=r.querySelector('input[type=number]');if(sel&&num)_wd.push({day:sel.value,att:num.value});});
+  rows.weekdays=_wd;
+  var _rv=[];document.querySelectorAll('#revRows .grid3').forEach(function(r){var i=r.querySelectorAll('input');if(i.length>=3)_rv.push({name:i[0].value,month:i[1].value,loc:i[2].value});});
+  rows.revivals=_rv;
+  rows.achievements=collectTxt('achRows');rows.challenges=collectTxt('chRows');
+  rows.visions=collectTxt('visRows');rows.how=collectTxt('howRows');
+  Object.keys(rows).forEach(function(k){if(JSON.stringify(rows[k]).replace(/[\[\]{}"]/g,'').replace(/day:|att:|name:|month:|loc:|amt:|mon:|date:|couple:/g,'')!=='')any=true;});
+  d._rows=rows;
+ }catch(e){}
  if(!any){localStorage.removeItem(draftKey());return;}
  save(draftKey(),d);
 }
@@ -362,8 +391,25 @@ function restoreDraftInto(){
  var filled=Object.keys(d).filter(function(id){return d[id]!=='';});
  if(!filled.length){localStorage.removeItem(draftKey());return;}
  var restored=0;
- Object.keys(d).forEach(function(id){var el=document.getElementById(id);if(el){el.value=d[id];restored++;}});
- if(!restored)return;
+ /* rebuild row-based sections first so their inputs exist */
+ if(d._rows){
+  try{
+   var R=d._rows,t;
+   t=document.getElementById('finTithe');if(t){t.innerHTML='';(R.finTithe&&R.finTithe.length?R.finTithe:[{}, {}, {}]).forEach(function(x){addFin('finTithe',x.amt,x.mon);});}
+   t=document.getElementById('finLevy');if(t){t.innerHTML='';(R.finLevy&&R.finLevy.length?R.finLevy:[{}, {}, {}]).forEach(function(x){addFin('finLevy',x.amt,x.mon);});}
+   t=document.getElementById('marRows');if(t){t.innerHTML='';(R.marriages&&R.marriages.length?R.marriages:[{}, {}, {}]).forEach(function(x){addMar(x.date,x.couple);});}
+   t=document.getElementById('wdRows');if(t&&R.weekdays){t.innerHTML='';(R.weekdays.length?R.weekdays:[{}]).forEach(function(x){addWd(x.day,x.att);});}
+   t=document.getElementById('revRows');if(t&&R.revivals){t.innerHTML='';(R.revivals.length?R.revivals:[{},{},{},{},{},{}]).forEach(function(x){addRevRow(x.name,x.month,x.loc);});}
+   if(typeof fillTxt==='function'){
+    t=document.getElementById('achRows');if(t){t.innerHTML='';fillTxt(R.achievements&&R.achievements.length?R.achievements:[{}],'achRows','Achievement');}
+    t=document.getElementById('chRows');if(t){t.innerHTML='';fillTxt(R.challenges&&R.challenges.length?R.challenges:[{},{}],'chRows','Challenge');}
+    t=document.getElementById('visRows');if(t){t.innerHTML='';fillTxt(R.visions&&R.visions.length?R.visions:[{},{}],'visRows','Vision');}
+    t=document.getElementById('howRows');if(t){t.innerHTML='';fillTxt(R.how&&R.how.length?R.how:[{},{}],'howRows','How');}
+   }
+  }catch(e){}
+ }
+ Object.keys(d).forEach(function(id){if(id==='_rows')return;var el=document.getElementById(id);if(el){el.value=d[id];restored++;}});
+ if(!restored&&!d._rows)return;
  FORM_DIRTY=true;
  var box=document.getElementById('reportForm');
  if(box){
@@ -820,7 +866,7 @@ function renderBranchList(){
  var box=document.getElementById('branchList');var bs=getBranches();
  if(!bs.length){box.innerHTML='<div class="empty">No branches.</div>';return;}
  var h='<table class="data"><tr><th>#</th><th>Branch Name</th><th>Pastor</th><th>Actions</th></tr>';
- bs.forEach(function(b,i){var p=getPastors().find(function(x){return x.branch===b;});h+='<tr><td>'+(i+1)+'</td><td><b>'+esc(b)+'</b></td><td>'+(p?esc(p.name):'—')+'</td><td><div class="row-actions"><button class="btn btn-gray btn-sm" onclick="editBranch('+i+')">Edit</button><button class="btn btn-red btn-sm" onclick="delBranch('+i+')">Delete</button></div></td></tr>';});
+ bs.forEach(function(b,i){var p=getPastors().find(function(x){return x.branch===b;});h+='<tr><td>'+(i+1)+'</td><td><b>'+esc(b)+'</b></td><td>'+(p?esc(p.name):'—')+'</td><td><div class="row-actions"><button class="btn btn-gray btn-sm" onclick="openBranch('+i+')">Edit</button><button class="btn btn-red btn-sm" onclick="delBranch('+i+')">Delete</button></div></td></tr>';});
  h+='</table>';box.innerHTML=h;
 }
 function openBranch(idx){
@@ -876,7 +922,7 @@ function doResetPass(kind,id){
  if(!it)return;
  hashPassword(nw).then(function(h){
   it.passHash=h;delete it.password;
-  if(kind==='pastor')setPastors(getPastors());else setSecs(getSecs());
+  if(kind==='pastor')setPastors(getPastors().map(ocopy));else setSecs(getSecs().map(ocopy));
   closeModal();showCreds(it.name,it.username,nw);
   if(kind==='pastor')renderAdminPastors();else renderPastorSecs();
  });
@@ -1638,6 +1684,7 @@ function exportPdf(id){
  await seed();
  ['branches','pastors','secs','reports','nato'].forEach(function(k){CACHE[k]=load(LS[k],(k==='nato')?{}:((k==='branches')?DEFAULTS.branches:[]));});
  loadTomb();
+ cleanupNumericBranches();
  /* auto-retire the leaked default admin password on devices still using it */
  if(getAdminRec().passHash===OLD_ADMIN_HASH)setAdminHash(DEFAULT_ADMIN_HASH);
  /* track unsaved form input so a sync event can never wipe it; autosave drafts */
